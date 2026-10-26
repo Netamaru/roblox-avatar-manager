@@ -1,5 +1,5 @@
 import { extractOutfitColors, normalizeBodyColor3s } from "@/lib/roblox-colors";
-import { avatarHeadshotApiUrl, hdThumbnailUrl, outfitThumbnailsApiUrl } from "@/lib/roblox-thumbnails";
+import { assetThumbnailsApiUrl, avatarHeadshotApiUrl, hdThumbnailUrl, outfitThumbnailsApiUrl } from "@/lib/roblox-thumbnails";
 import {
   OutfitWritePayload,
   RobloxApiError,
@@ -186,6 +186,30 @@ export async function getOutfitThumbnails(outfitIds: number[]) {
       }
     } catch (err) {
       console.warn("Failed to fetch thumbnail batch", err);
+    }
+  }
+
+  return thumbnailMap;
+}
+
+export async function getAssetThumbnails(assetIds: number[]) {
+  if (assetIds.length === 0) return {};
+  const thumbnailMap: Record<number, string> = {};
+  const batchSize = 50;
+
+  for (let i = 0; i < assetIds.length; i += batchSize) {
+    const batch = assetIds.slice(i, i + batchSize);
+    try {
+      const res = await fetch(assetThumbnailsApiUrl(batch), { cache: "no-store" });
+      if (!res.ok) continue;
+      const json = (await res.json()) as { data?: ThumbnailItem[] };
+      for (const item of json.data || []) {
+        if (item.targetId && item.imageUrl) {
+          thumbnailMap[item.targetId] = item.imageUrl;
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to fetch asset thumbnail batch", err);
     }
   }
 

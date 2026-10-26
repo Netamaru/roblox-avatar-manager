@@ -14,7 +14,8 @@ interface BulkDeleteModalProps {
   user: RobloxUser | null;
   cookie: string;
   delaySeconds?: number;
-  onDownloadBackup: () => void;
+  hasBackupThisSession: boolean;
+  onDownloadBackupIfNeeded: () => boolean;
   onDeletionComplete: () => void;
 }
 
@@ -25,7 +26,8 @@ export default function BulkDeleteModal({
   user,
   cookie,
   delaySeconds = 1.5,
-  onDownloadBackup,
+  hasBackupThisSession,
+  onDownloadBackupIfNeeded,
   onDeletionComplete,
 }: BulkDeleteModalProps) {
   const [hasConfirmed, setHasConfirmed] = useState(false);
@@ -82,12 +84,16 @@ export default function BulkDeleteModal({
   const handleStartDelete = async () => {
     if (confirmInput.trim().toUpperCase() !== "DELETE") return;
 
-    onDownloadBackup();
+    const didBackup = onDownloadBackupIfNeeded();
     setHasConfirmed(true);
     setIsDeleting(true);
 
     addLog("info", `Starting permanent deletion of ${totalCount} active outfits from Roblox...`);
-    addLog("success", "Automatic JSON backup downloaded to your computer.");
+    if (didBackup) {
+      addLog("success", "JSON backup downloaded.");
+    } else if (hasBackupThisSession) {
+      addLog("info", "Using JSON backup from earlier this session.");
+    }
 
     let csrfToken: string | undefined = undefined;
     try {
@@ -229,11 +235,14 @@ export default function BulkDeleteModal({
                 </div>
               </div>
 
-              {/* Auto Backup Info */}
               <div className="p-4 rounded-xl bg-zinc-900/80 border border-zinc-800 space-y-1 text-xs">
-                <span className="font-semibold text-emerald-400 block text-xs">✓ Automatic Backup Included</span>
+                <span className="font-semibold text-emerald-400 block text-xs">
+                  {hasBackupThisSession ? "JSON backup already saved" : "JSON backup"}
+                </span>
                 <p className="text-zinc-400 leading-relaxed">
-                  A full JSON backup file of all your outfits will automatically download to your computer before deletion begins.
+                  {hasBackupThisSession
+                    ? "A backup was already saved this session. Deletion will not download another file."
+                    : "A JSON backup of your current list will download once before deletion begins."}
                 </p>
               </div>
 
@@ -294,7 +303,7 @@ export default function BulkDeleteModal({
                   onClick={handleStartDelete}
                   className="px-5 py-2.5 font-semibold text-sm text-white bg-red-600 hover:bg-red-500 disabled:opacity-30 disabled:hover:bg-red-600 rounded-xl transition shadow-md cursor-pointer"
                 >
-                  Backup &amp; Permanently Delete ({totalCount})
+                  {hasBackupThisSession ? "Permanently Delete" : "Backup & Permanently Delete"} ({totalCount})
                 </button>
               </div>
             </div>

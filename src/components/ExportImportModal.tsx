@@ -14,6 +14,7 @@ interface ExportImportModalProps {
   outfits: ArrangedOutfit[];
   user: RobloxUser | null;
   onImportOutfits: (imported: ArrangedOutfit[], replace: boolean) => void;
+  onBackupCreated?: () => void;
   onFetchMissingDetails?: () => Promise<void>;
 }
 
@@ -24,6 +25,7 @@ export default function ExportImportModal({
   outfits,
   user,
   onImportOutfits,
+  onBackupCreated,
   onFetchMissingDetails,
 }: ExportImportModalProps) {
   const [activeTab, setActiveTab] = useState<"export" | "import">(defaultTab);
@@ -85,6 +87,7 @@ export default function ExportImportModal({
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    onBackupCreated?.();
   };
 
   const handleCopy = () => {

@@ -16,3 +16,9 @@ export function avatarHeadshotApiUrl(userId: number): string {
 export function hdThumbnailUrl(url: string): string {
   return url.replaceAll("/150/150/", "/420/420/");
 }
+
+export const ASSET_THUMBNAIL_SIZE = "150x150";
+
+export function assetThumbnailsApiUrl(assetIds: number[]): string {
+  return `https://thumbnails.roblox.com/v1/assets?assetIds=${assetIds.join(",")}&size=${ASSET_THUMBNAIL_SIZE}&format=Png&isCircular=false`;
+}

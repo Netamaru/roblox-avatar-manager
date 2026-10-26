@@ -21,10 +21,11 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface OutfitDetailModalProps {
   outfit: ArrangedOutfit | null;
+  cookie: string;
   onClose: () => void;
   onPatch?: (outfit: ArrangedOutfit) => void;
   isFetchingDetails?: boolean;
@@ -77,15 +78,15 @@ function getBrickColorHex(id: number | undefined): string {
 
 interface JsonToken {
   type:
-  | "key"
-  | "colon"
-  | "string"
-  | "number"
-  | "boolean"
-  | "null"
-  | "punctuation"
-  | "whitespace"
-  | "text";
+    | "key"
+    | "colon"
+    | "string"
+    | "number"
+    | "boolean"
+    | "null"
+    | "punctuation"
+    | "whitespace"
+    | "text";
   text: string;
 }
 
@@ -169,25 +170,92 @@ function renderJsonToken(token: JsonToken, idx: number) {
   }
 }
 
+function CatalogAssetThumb({
+  name,
+  imageUrl,
+}: {
+  name: string;
+  imageUrl?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  if (!imageUrl || failed) {
+    return <span className="w-24 min-h-16 self-stretch shrink-0" aria-hidden />;
+  }
+
+  return (
+    <span className="relative w-24 min-h-16 self-stretch shrink-0">
+      <Image
+        src={hdThumbnailUrl(imageUrl)}
+        alt={name}
+        fill
+        className="object-contain"
+        unoptimized
+        onError={() => setFailed(true)}
+      />
+    </span>
+  );
+}
+
 export default function OutfitDetailModal({
   outfit,
+  cookie,
   onClose,
   onPatch,
   isFetchingDetails = false,
 }: OutfitDetailModalProps) {
-  const [activeTab, setActiveTab] = useState<"items" | "body" | "json">("items");
+  const [activeTab, setActiveTab] = useState<"items" | "body" | "json">(
+    "items",
+  );
   const [copiedId, setCopiedId] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
   const [isWordWrap, setIsWordWrap] = useState(true);
+  const [assetThumbs, setAssetThumbs] = useState<{
+    key: string;
+    map: Record<number, string>;
+  }>({ key: "", map: {} });
 
   const jsonString = useMemo(
     () => (outfit ? JSON.stringify(outfit, null, 2) : ""),
-    [outfit]
+    [outfit],
   );
   const jsonLines = useMemo(
     () => (jsonString ? jsonString.split("\n") : []),
-    [jsonString]
+    [jsonString],
   );
+  const assetIdsKey =
+    outfit?.details?.assets?.map((asset) => asset.id).join(",") ?? "";
+
+  useEffect(() => {
+    if (!cookie || !assetIdsKey) return;
+
+    const assetIds = assetIdsKey.split(",").map(Number);
+    let cancelled = false;
+
+    fetch("/api/roblox/asset-thumbnails", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cookie, assetIds }),
+    })
+      .then(
+        (res) => res.json() as Promise<{ thumbnails?: Record<number, string> }>,
+      )
+      .then((data) => {
+        if (!cancelled && data.thumbnails) {
+          setAssetThumbs({ key: assetIdsKey, map: data.thumbnails });
+        }
+      })
+      .catch(() => {
+        /* keep previous map; CatalogAssetThumb falls back when missing */
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cookie, assetIdsKey]);
+
+  const resolvedAssetThumbs =
+    assetThumbs.key === assetIdsKey ? assetThumbs.map : {};
 
   if (!outfit) return null;
 
@@ -228,21 +296,67 @@ export default function OutfitDetailModal({
   };
 
   const bodyParts = [
-    { label: "Head", id: bodyColors?.headColorId, hex: details?.bodyColor3s?.headColor3 },
-    { label: "Torso", id: bodyColors?.torsoColorId, hex: details?.bodyColor3s?.torsoColor3 },
-    { label: "Left Arm", id: bodyColors?.leftArmColorId, hex: details?.bodyColor3s?.leftArmColor3 },
-    { label: "Right Arm", id: bodyColors?.rightArmColorId, hex: details?.bodyColor3s?.rightArmColor3 },
-    { label: "Left Leg", id: bodyColors?.leftLegColorId, hex: details?.bodyColor3s?.leftLegColor3 },
-    { label: "Right Leg", id: bodyColors?.rightLegColorId, hex: details?.bodyColor3s?.rightLegColor3 },
+    {
+      label: "Head",
+      id: bodyColors?.headColorId,
+      hex: details?.bodyColor3s?.headColor3,
+    },
+    {
+      label: "Torso",
+      id: bodyColors?.torsoColorId,
+      hex: details?.bodyColor3s?.torsoColor3,
+    },
+    {
+      label: "Left Arm",
+      id: bodyColors?.leftArmColorId,
+      hex: details?.bodyColor3s?.leftArmColor3,
+    },
+    {
+      label: "Right Arm",
+      id: bodyColors?.rightArmColorId,
+      hex: details?.bodyColor3s?.rightArmColor3,
+    },
+    {
+      label: "Left Leg",
+      id: bodyColors?.leftLegColorId,
+      hex: details?.bodyColor3s?.leftLegColor3,
+    },
+    {
+      label: "Right Leg",
+      id: bodyColors?.rightLegColorId,
+      hex: details?.bodyColor3s?.rightLegColor3,
+    },
   ];
 
   const scaleMetrics = [
-    { label: "Height", value: scale?.height != null ? `${Math.round(scale.height * 100)}%` : "-" },
-    { label: "Width", value: scale?.width != null ? `${Math.round(scale.width * 100)}%` : "-" },
-    { label: "Head", value: scale?.head != null ? `${Math.round(scale.head * 100)}%` : "-" },
-    { label: "Depth", value: scale?.depth != null ? `${Math.round(scale.depth * 100)}%` : "-" },
-    { label: "Proportion", value: scale?.proportion != null ? `${Math.round(scale.proportion * 100)}%` : "-" },
-    { label: "Body Type", value: scale?.bodyType != null ? `${Math.round(scale.bodyType * 100)}%` : "-" },
+    {
+      label: "Height",
+      value: scale?.height != null ? `${Math.round(scale.height * 100)}%` : "-",
+    },
+    {
+      label: "Width",
+      value: scale?.width != null ? `${Math.round(scale.width * 100)}%` : "-",
+    },
+    {
+      label: "Head",
+      value: scale?.head != null ? `${Math.round(scale.head * 100)}%` : "-",
+    },
+    {
+      label: "Depth",
+      value: scale?.depth != null ? `${Math.round(scale.depth * 100)}%` : "-",
+    },
+    {
+      label: "Proportion",
+      value:
+        scale?.proportion != null
+          ? `${Math.round(scale.proportion * 100)}%`
+          : "-",
+    },
+    {
+      label: "Body Type",
+      value:
+        scale?.bodyType != null ? `${Math.round(scale.bodyType * 100)}%` : "-",
+    },
   ];
 
   return (
@@ -309,7 +423,9 @@ export default function OutfitDetailModal({
                 ) : (
                   <div className="flex flex-col items-center justify-center text-zinc-600 gap-2">
                     <User className="w-16 h-16" />
-                    <span className="text-xs text-zinc-500 font-medium">No preview available</span>
+                    <span className="text-xs text-zinc-500 font-medium">
+                      No preview available
+                    </span>
                   </div>
                 )}
 
@@ -338,7 +454,9 @@ export default function OutfitDetailModal({
                     {copiedId ? (
                       <>
                         <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-emerald-400 font-sans">Copied!</span>
+                        <span className="text-emerald-400 font-sans">
+                          Copied!
+                        </span>
                       </>
                     ) : (
                       <>
@@ -364,15 +482,21 @@ export default function OutfitDetailModal({
             {/* Quick Metrics Bar */}
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-800/80">
               <div className="p-3 rounded-lg bg-zinc-900/70 border border-zinc-800">
-                <span className="text-xs text-zinc-400 block font-medium">Equipped Items</span>
+                <span className="text-xs text-zinc-400 block font-medium">
+                  Equipped Items
+                </span>
                 {isDetailsPending ? (
                   <PulseSkeleton className="h-5 w-16 mt-1" />
                 ) : (
-                  <span className="text-base font-bold text-white">{assets.length} items</span>
+                  <span className="text-base font-bold text-white">
+                    {assets.length} items
+                  </span>
                 )}
               </div>
               <div className="p-3 rounded-lg bg-zinc-900/70 border border-zinc-800">
-                <span className="text-xs text-zinc-400 block font-medium">Avatar Model</span>
+                <span className="text-xs text-zinc-400 block font-medium">
+                  Avatar Model
+                </span>
                 {isDetailsPending ? (
                   <PulseSkeleton className="h-5 w-14 mt-1" />
                 ) : (
@@ -389,11 +513,13 @@ export default function OutfitDetailModal({
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-300">
                   <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>
-                    Needs Fix ({missingAssetsCount} missing item{missingAssetsCount === 1 ? "" : "s"})
+                    Needs Fix ({missingAssetsCount} missing item
+                    {missingAssetsCount === 1 ? "" : "s"})
                   </span>
                 </div>
                 <p className="text-[11px] text-amber-300/80 leading-snug">
-                  Contains deleted or unwearable items. The reorder engine automatically skips these items to prevent HTTP 400 errors.
+                  Contains deleted or unwearable items. Missing items are
+                  skipped when saving to Roblox.
                 </p>
               </div>
             )}
@@ -405,10 +531,11 @@ export default function OutfitDetailModal({
             <div className="shrink-0 flex items-center gap-2 px-6 pt-4 border-b border-zinc-800 bg-zinc-950/60">
               <button
                 onClick={() => setActiveTab("items")}
-                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${activeTab === "items"
-                  ? "border-sky-500 text-white"
-                  : "border-transparent text-zinc-400 hover:text-zinc-200"
-                  }`}
+                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${
+                  activeTab === "items"
+                    ? "border-sky-500 text-white"
+                    : "border-transparent text-zinc-400 hover:text-zinc-200"
+                }`}
               >
                 <Layers className="w-4 h-4" />
                 <span>Equipped Assets</span>
@@ -416,10 +543,11 @@ export default function OutfitDetailModal({
                   <PulseSkeleton className="h-5 w-7 rounded-full" />
                 ) : (
                   <span
-                    className={`px-2 py-0.5 text-xs rounded-full font-mono ${activeTab === "items"
-                      ? "bg-sky-950 text-sky-400 border border-sky-800/60"
-                      : "bg-zinc-900 text-zinc-400 border border-zinc-800"
-                      }`}
+                    className={`px-2 py-0.5 text-xs rounded-full font-mono ${
+                      activeTab === "items"
+                        ? "bg-sky-950 text-sky-400 border border-sky-800/60"
+                        : "bg-zinc-900 text-zinc-400 border border-zinc-800"
+                    }`}
                   >
                     {assets.length}
                   </span>
@@ -428,10 +556,11 @@ export default function OutfitDetailModal({
 
               <button
                 onClick={() => setActiveTab("body")}
-                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${activeTab === "body"
-                  ? "border-sky-500 text-white"
-                  : "border-transparent text-zinc-400 hover:text-zinc-200"
-                  }`}
+                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${
+                  activeTab === "body"
+                    ? "border-sky-500 text-white"
+                    : "border-transparent text-zinc-400 hover:text-zinc-200"
+                }`}
               >
                 <Sliders className="w-4 h-4" />
                 <span>Body & Proportions</span>
@@ -439,10 +568,11 @@ export default function OutfitDetailModal({
 
               <button
                 onClick={() => setActiveTab("json")}
-                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${activeTab === "json"
-                  ? "border-sky-500 text-white"
-                  : "border-transparent text-zinc-400 hover:text-zinc-200"
-                  }`}
+                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${
+                  activeTab === "json"
+                    ? "border-sky-500 text-white"
+                    : "border-transparent text-zinc-400 hover:text-zinc-200"
+                }`}
               >
                 <Code className="w-4 h-4" />
                 <span>Raw JSON</span>
@@ -451,10 +581,11 @@ export default function OutfitDetailModal({
 
             {/* Tab Contents */}
             <div
-              className={`flex-1 min-h-0 ${activeTab === "json"
-                ? "p-4 sm:p-5 flex flex-col overflow-hidden"
-                : "p-6 overflow-y-auto space-y-6"
-                }`}
+              className={`flex-1 min-h-0 ${
+                activeTab === "json"
+                  ? "p-4 sm:p-5 flex flex-col overflow-hidden"
+                  : "p-6 overflow-y-auto space-y-6"
+              }`}
             >
               {activeTab === "items" ? (
                 <div className="space-y-3">
@@ -472,86 +603,104 @@ export default function OutfitDetailModal({
                     </div>
                   ) : (
                     <>
-                  {missingAssetsCount > 0 && (
-                    <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-700/60 text-amber-200 space-y-1.5">
-                      <div className="flex items-center gap-2 font-semibold text-sm text-amber-300">
-                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>Notice: Detected {missingAssetsCount} deleted / unwearable item{missingAssetsCount === 1 ? "" : "s"}</span>
-                      </div>
-                      <p className="text-xs text-amber-200/80 leading-relaxed">
-                        Items labeled <strong className="text-amber-200 font-semibold">&ldquo;Deleted / Unwearable&rdquo;</strong> below have been moderated or removed from the Roblox catalog.
-                        During the reorder/recreate process, our system automatically skips missing items so this outfit can be safely recreated without HTTP 400 errors.
-                      </p>
-                    </div>
-                  )}
-
-                  {assets.length > 0 ? (
-                    <div className="space-y-2.5">
-                      {assets.map((asset) => {
-                        const isMissing = isAssetMissing(asset);
-                        return (
-                          <div
-                            key={asset.id}
-                            className={`p-3.5 rounded-xl border transition flex items-center justify-between gap-3 group ${isMissing
-                                ? "border-amber-500/70 bg-gradient-to-r from-amber-950/30 to-zinc-900/60 hover:bg-amber-950/40 hover:border-amber-400 ring-1 ring-amber-500/30"
-                                : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900/80 hover:border-zinc-700"
-                              }`}
-                          >
-                            <div className="min-w-0 space-y-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="font-semibold text-sm text-zinc-100 truncate group-hover:text-white">
-                                  {asset.name}
-                                </p>
-                                {isMissing && (
-                                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/50 text-amber-300 font-semibold flex items-center gap-1 shrink-0">
-                                    <AlertTriangle className="w-3 h-3 text-amber-400" />
-                                    Deleted / Unwearable
-                                  </span>
-                                )}
-                                {asset.meta && (
-                                  <span
-                                    className="text-[10px] px-2 py-0.5 rounded-md bg-sky-950/80 border border-sky-800 text-sky-300 font-mono shrink-0"
-                                    title={`Custom Pos: [${asset.meta.position?.X?.toFixed(2)}, ${asset.meta.position?.Y?.toFixed(2)}, ${asset.meta.position?.Z?.toFixed(2)}]`}
-                                  >
-                                    3D Adjustments
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2 text-xs text-zinc-400 font-mono">
-                                <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[11px] font-sans font-medium">
-                                  {asset.assetType?.name || "Accessory"}
-                                </span>
-                                <span>ID: #{asset.id}</span>
-                              </div>
-                              {isMissing && (
-                                <p className="text-[11px] text-amber-400/90 font-sans mt-0.5">
-                                  Item is unlisted or unwearable in Roblox. Will be automatically skipped during reorder.
-                                </p>
-                              )}
-                            </div>
-
-                            <a
-                              href={`https://www.roblox.com/catalog/${asset.id}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="p-2 text-zinc-400 hover:text-sky-400 hover:bg-zinc-800/80 rounded-lg transition shrink-0"
-                              title="Open in Roblox Catalog"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                            </a>
+                      {missingAssetsCount > 0 && (
+                        <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-700/60 text-amber-200 space-y-1.5">
+                          <div className="flex items-center gap-2 font-semibold text-sm text-amber-300">
+                            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span>
+                              Notice: Detected {missingAssetsCount} deleted /
+                              unwearable item
+                              {missingAssetsCount === 1 ? "" : "s"}
+                            </span>
                           </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="py-12 text-center border border-dashed border-zinc-800 rounded-xl p-6">
-                      <Layers className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-                      <p className="text-sm text-zinc-400 font-medium">No assets equipped</p>
-                      <p className="text-xs text-zinc-500 mt-1">
-                        This outfit doesn&apos;t have any accessories or catalog items attached.
-                      </p>
-                    </div>
-                  )}
+                          <p className="text-xs text-amber-200/80 leading-relaxed">
+                            Items labeled{" "}
+                            <strong className="text-amber-200 font-semibold">
+                              &ldquo;Deleted / Unwearable&rdquo;
+                            </strong>{" "}
+                            below have been moderated or removed from the Roblox
+                            catalog. Missing items are skipped when saving to
+                            Roblox.
+                          </p>
+                        </div>
+                      )}
+
+                      {assets.length > 0 ? (
+                        <div className="space-y-2.5">
+                          {assets.map((asset) => {
+                            const isMissing = isAssetMissing(asset);
+                            return (
+                              <div
+                                key={asset.id}
+                                className={`relative rounded-xl border transition flex items-stretch overflow-hidden group ${
+                                  isMissing
+                                    ? "border-amber-500/70 bg-gradient-to-r from-amber-950/30 to-zinc-900/60 hover:bg-amber-950/40 hover:border-amber-400 ring-1 ring-amber-500/30"
+                                    : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900/80 hover:border-zinc-700"
+                                }`}
+                              >
+                                <CatalogAssetThumb
+                                  name={asset.name}
+                                  imageUrl={resolvedAssetThumbs[asset.id]}
+                                />
+                                <div className="min-w-0 flex-1 space-y-1 py-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="font-semibold text-sm text-zinc-100 truncate group-hover:text-white">
+                                      {asset.name}
+                                    </p>
+                                    {isMissing && (
+                                      <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/50 text-amber-300 font-semibold flex items-center gap-1 shrink-0">
+                                        <AlertTriangle className="w-3 h-3 text-amber-400" />
+                                        Deleted / Unwearable
+                                      </span>
+                                    )}
+                                    {asset.meta && (
+                                      <span
+                                        className="text-[10px] px-2 py-0.5 rounded-md bg-sky-950/80 border border-sky-800 text-sky-300 font-mono shrink-0"
+                                        title={`Custom Pos: [${asset.meta.position?.X?.toFixed(2)}, ${asset.meta.position?.Y?.toFixed(2)}, ${asset.meta.position?.Z?.toFixed(2)}]`}
+                                      >
+                                        3D Adjustments
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs text-zinc-400 font-mono">
+                                    <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[11px] font-sans font-medium">
+                                      {asset.assetType?.name || "Accessory"}
+                                    </span>
+                                    <span>ID: #{asset.id}</span>
+                                  </div>
+                                  {isMissing && (
+                                    <p className="text-[11px] text-amber-400/90 font-sans mt-0.5">
+                                      Item is unlisted or unwearable in Roblox.
+                                      It will be skipped when saving to Roblox.
+                                    </p>
+                                  )}
+                                </div>
+
+                                <a
+                                  href={`https://www.roblox.com/catalog/${asset.id}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="p-2 mr-2 self-center text-zinc-400 hover:text-sky-400 hover:bg-zinc-800/80 rounded-lg transition shrink-0"
+                                  title="Open in Roblox Catalog"
+                                >
+                                  <ExternalLink className="w-4 h-4" />
+                                </a>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="py-12 text-center border border-dashed border-zinc-800 rounded-xl p-6">
+                          <Layers className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                          <p className="text-sm text-zinc-400 font-medium">
+                            No assets equipped
+                          </p>
+                          <p className="text-xs text-zinc-500 mt-1">
+                            This outfit doesn&apos;t have any accessories or
+                            catalog items attached.
+                          </p>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -593,65 +742,69 @@ export default function OutfitDetailModal({
                     </>
                   ) : (
                     <>
-                  {/* Proportions & Scaling */}
-                  {scale ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-zinc-200">
-                        <Sliders className="w-4 h-4 text-sky-400" />
-                        <span>Scaling & Proportions</span>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                        {scaleMetrics.map((item) => (
-                          <div
-                            key={item.label}
-                            className="p-3 bg-zinc-900/60 border border-zinc-800 rounded-xl"
-                          >
-                            <span className="text-xs text-zinc-400 block font-medium">
-                              {item.label}
-                            </span>
-                            <span className="text-base font-bold font-mono text-zinc-100 mt-0.5 block">
-                              {item.value}
-                            </span>
+                      {/* Proportions & Scaling */}
+                      {scale ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-zinc-200">
+                            <Sliders className="w-4 h-4 text-sky-400" />
+                            <span>Scaling & Proportions</span>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* Body Colors */}
-                  {bodyColors ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-zinc-200">
-                        <Palette className="w-4 h-4 text-sky-400" />
-                        <span>Body Colors</span>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                        {bodyParts.map((part) => {
-                          const hex = part.hex ? formatCssHex(part.hex) : getBrickColorHex(part.id);
-                          return (
-                            <div
-                              key={part.label}
-                              className="p-3 bg-zinc-900/60 border border-zinc-800 rounded-xl flex items-center gap-3"
-                            >
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                            {scaleMetrics.map((item) => (
                               <div
-                                className="w-8 h-8 rounded-lg border border-white/10 shadow-sm shrink-0"
-                                style={{ backgroundColor: hex }}
-                                title={`Color: ${hex} (ID: #${part.id || 0})`}
-                              />
-                              <div className="min-w-0">
+                                key={item.label}
+                                className="p-3 bg-zinc-900/60 border border-zinc-800 rounded-xl"
+                              >
                                 <span className="text-xs text-zinc-400 block font-medium">
-                                  {part.label}
+                                  {item.label}
                                 </span>
-                                <span className="text-xs font-mono font-semibold text-zinc-200 block truncate">
-                                  {part.hex ? `#${part.hex.toLowerCase()}` : `Brick #${part.id || 0}`}
+                                <span className="text-base font-bold font-mono text-zinc-100 mt-0.5 block">
+                                  {item.value}
                                 </span>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : null}
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {/* Body Colors */}
+                      {bodyColors ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-zinc-200">
+                            <Palette className="w-4 h-4 text-sky-400" />
+                            <span>Body Colors</span>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                            {bodyParts.map((part) => {
+                              const hex = part.hex
+                                ? formatCssHex(part.hex)
+                                : getBrickColorHex(part.id);
+                              return (
+                                <div
+                                  key={part.label}
+                                  className="p-3 bg-zinc-900/60 border border-zinc-800 rounded-xl flex items-center gap-3"
+                                >
+                                  <div
+                                    className="w-8 h-8 rounded-lg border border-white/10 shadow-sm shrink-0"
+                                    style={{ backgroundColor: hex }}
+                                    title={`Color: ${hex} (ID: #${part.id || 0})`}
+                                  />
+                                  <div className="min-w-0">
+                                    <span className="text-xs text-zinc-400 block font-medium">
+                                      {part.label}
+                                    </span>
+                                    <span className="text-xs font-mono font-semibold text-zinc-200 block truncate">
+                                      {part.hex
+                                        ? `#${part.hex.toLowerCase()}`
+                                        : `Brick #${part.id || 0}`}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
                     </>
                   )}
                 </div>
@@ -667,10 +820,11 @@ export default function OutfitDetailModal({
                         {/* Word Wrap Toggle */}
                         <button
                           onClick={() => setIsWordWrap(!isWordWrap)}
-                          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition cursor-pointer ${isWordWrap
-                            ? "bg-sky-950/80 text-sky-300 border-sky-800/80 shadow-xs"
-                            : "bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-zinc-750 hover:bg-zinc-750"
-                            }`}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition cursor-pointer ${
+                            isWordWrap
+                              ? "bg-sky-950/80 text-sky-300 border-sky-800/80 shadow-xs"
+                              : "bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-zinc-750 hover:bg-zinc-750"
+                          }`}
                           title={
                             isWordWrap
                               ? "Word wrap is active: text breaks to new lines without clipping"
@@ -694,10 +848,11 @@ export default function OutfitDetailModal({
                         {/* Copy JSON */}
                         <button
                           onClick={handleCopyJson}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition cursor-pointer ${copiedJson
-                            ? "bg-emerald-950/80 border-emerald-800 text-emerald-300"
-                            : "bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-200 hover:text-white"
-                            }`}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition cursor-pointer ${
+                            copiedJson
+                              ? "bg-emerald-950/80 border-emerald-800 text-emerald-300"
+                              : "bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-200 hover:text-white"
+                          }`}
                           title="Copy full JSON payload"
                         >
                           {copiedJson ? (
@@ -717,8 +872,9 @@ export default function OutfitDetailModal({
 
                     {/* Code Lines Canvas */}
                     <div
-                      className={`flex-1 min-h-0 overflow-y-auto p-3 font-mono text-xs leading-relaxed selection:bg-sky-500/30 ${isWordWrap ? "overflow-x-hidden" : "overflow-x-auto"
-                        }`}
+                      className={`flex-1 min-h-0 overflow-y-auto p-3 font-mono text-xs leading-relaxed selection:bg-sky-500/30 ${
+                        isWordWrap ? "overflow-x-hidden" : "overflow-x-auto"
+                      }`}
                     >
                       {jsonLines.map((line, lineIdx) => {
                         const tokens = tokenizeJsonLine(line);
@@ -731,13 +887,14 @@ export default function OutfitDetailModal({
                               {lineIdx + 1}
                             </span>
                             <div
-                              className={`flex-1 min-w-0 font-mono text-xs leading-5 ${isWordWrap
-                                ? "whitespace-pre-wrap break-all"
-                                : "whitespace-pre"
-                                }`}
+                              className={`flex-1 min-w-0 font-mono text-xs leading-5 ${
+                                isWordWrap
+                                  ? "whitespace-pre-wrap break-all"
+                                  : "whitespace-pre"
+                              }`}
                             >
                               {tokens.map((token, tokIdx) =>
-                                renderJsonToken(token, tokIdx)
+                                renderJsonToken(token, tokIdx),
                               )}
                             </div>
                           </div>
@@ -748,26 +905,36 @@ export default function OutfitDetailModal({
                     {/* Syntax Highlight Legend */}
                     <div className="shrink-0 bg-zinc-900/70 border-t border-zinc-800/80 px-3.5 py-1.5 flex items-center justify-between gap-2 text-[11px] text-zinc-400 select-none">
                       <div className="flex items-center gap-3 overflow-x-auto py-0.5">
-                        <span className="text-zinc-500 font-medium">Syntax:</span>
+                        <span className="text-zinc-500 font-medium">
+                          Syntax:
+                        </span>
                         <span className="flex items-center gap-1">
                           <span className="w-2 h-2 rounded-full bg-sky-400 inline-block" />
                           <span className="text-sky-300 font-medium">Key</span>
                         </span>
                         <span className="flex items-center gap-1">
                           <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-                          <span className="text-emerald-300 font-medium">String</span>
+                          <span className="text-emerald-300 font-medium">
+                            String
+                          </span>
                         </span>
                         <span className="flex items-center gap-1">
                           <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
-                          <span className="text-amber-300 font-medium">Number</span>
+                          <span className="text-amber-300 font-medium">
+                            Number
+                          </span>
                         </span>
                         <span className="flex items-center gap-1">
                           <span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />
-                          <span className="text-purple-300 font-medium">Boolean</span>
+                          <span className="text-purple-300 font-medium">
+                            Boolean
+                          </span>
                         </span>
                         <span className="flex items-center gap-1">
                           <span className="w-2 h-2 rounded-full bg-rose-400 inline-block" />
-                          <span className="text-rose-300 font-medium">Null</span>
+                          <span className="text-rose-300 font-medium">
+                            Null
+                          </span>
                         </span>
                       </div>
                       <span className="hidden sm:inline text-zinc-500 font-mono text-[10px]">

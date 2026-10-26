@@ -15,7 +15,6 @@ interface DryRunModalProps {
   user: RobloxUser | null;
   cookie: string;
   onProceedToExecute: (delaySeconds: number) => void;
-  onDownloadBackup: () => void;
 }
 
 export default function DryRunModal({
@@ -176,7 +175,7 @@ export default function DryRunModal({
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
           <div>
             <h3 className="text-base font-bold text-white tracking-tight">Pre-Flight Test Run</h3>
-            <p className="text-xs text-zinc-400 mt-0.5">Automated safety diagnostics before executing avatar order</p>
+            <p className="text-xs text-zinc-400 mt-0.5">Automated safety diagnostics before saving to Roblox</p>
           </div>
           <button
             onClick={onClose}
@@ -264,7 +263,7 @@ export default function DryRunModal({
           {/* Plan list */}
           <div className="space-y-2">
             <span className="font-semibold text-zinc-200 text-sm">
-              Execution Sequence ({planItems.length} steps):
+              Save plan ({planItems.length} steps):
             </span>
             <div className="max-h-48 overflow-y-auto divide-y divide-zinc-800 rounded-xl border border-zinc-800 bg-zinc-900/50 text-xs">
               {planItems.map((item) => (
@@ -307,7 +306,7 @@ export default function DryRunModal({
             className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-zinc-950 bg-white hover:bg-zinc-200 rounded-xl transition disabled:opacity-40 shadow-sm cursor-pointer"
           >
             <Play className="w-4 h-4 fill-current" />
-            <span>Proceed to Execution</span>
+            <span>Continue to Save</span>
           </button>
         </div>
       </div>

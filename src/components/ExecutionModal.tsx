@@ -16,7 +16,9 @@ interface ExecutionModalProps {
   user: RobloxUser | null;
   cookie: string;
   delaySeconds: number;
-  onDownloadBackup: () => void;
+  hasBackupThisSession: boolean;
+  onDownloadBackupIfNeeded: () => boolean;
+  onDownloadBackup: () => boolean;
   onExecutionComplete: () => void;
 }
 
@@ -27,6 +29,8 @@ export default function ExecutionModal({
   user,
   cookie,
   delaySeconds = 1.5,
+  hasBackupThisSession,
+  onDownloadBackupIfNeeded,
   onDownloadBackup,
   onExecutionComplete,
 }: ExecutionModalProps) {
@@ -73,7 +77,6 @@ export default function ExecutionModal({
   };
 
   const handleStartExecution = async () => {
-    onDownloadBackup();
     setHasConfirmed(true);
 
     const activeOutfits = outfits.filter((o) => !o.isExcluded);
@@ -94,8 +97,7 @@ export default function ExecutionModal({
     isPausedRef.current = false;
     isAbortedRef.current = false;
 
-    addLog("info", "Starting avatar save process...");
-    addLog("success", "Automatic JSON backup downloaded to your computer.");
+    addLog("info", "Starting save to Roblox...");
 
     let csrfToken: string | undefined = undefined;
 
@@ -146,6 +148,12 @@ export default function ExecutionModal({
     if (totalDeletes === 0) {
       addLog("info", "Your Roblox account currently has 0 outfits. Skipping deletion phase.");
     } else {
+      const didBackup = onDownloadBackupIfNeeded();
+      if (didBackup) {
+        addLog("success", "JSON backup downloaded.");
+      } else if (hasBackupThisSession) {
+        addLog("info", "Using JSON backup from earlier this session.");
+      }
       setState((prev) => ({
         ...prev,
         status: "deleting",
@@ -215,13 +223,13 @@ export default function ExecutionModal({
       }
     }
 
-    // Phase 2: Recreate bottom-to-top
+    // Phase 2: Save bottom-to-top so #1 ends at the top of Roblox inventory
     setState((prev) => ({
       ...prev,
       status: "creating",
-      currentAction: `Creating ${totalCount} outfits in sequence`,
+      currentAction: `Saving ${totalCount} outfits to Roblox`,
     }));
-    addLog("info", `Creating ${totalCount} outfits (reverse sequence)...`);
+    addLog("info", `Saving ${totalCount} outfits to Roblox...`);
 
     const reversed = [...activeOutfits].reverse();
     const failedList: Array<{ outfit: ArrangedOutfit; error: string }> = [];
@@ -250,7 +258,7 @@ export default function ExecutionModal({
         currentItemName: outfit.name,
       }));
 
-      addLog("info", `[Recreate ${j + 1}/${totalCount}] "${outfit.name}" -> target rank #${targetRank}...`);
+      addLog("info", `[Save] ${j + 1}/${totalCount}] "${outfit.name}" -> target rank #${targetRank}...`);
 
       let createSuccess = false;
       let createAttempts = 0;
@@ -284,7 +292,7 @@ export default function ExecutionModal({
 
           if (res.status === 429) {
             const waitSec = createAttempts * 7;
-            addLog("warning", `[Recreate ${j + 1}/${totalCount}] Rate limited (HTTP 429). Waiting ${waitSec}s before retry (${createAttempts}/3)...`);
+            addLog("warning", `[Save] ${j + 1}/${totalCount}] Rate limited (HTTP 429). Waiting ${waitSec}s before retry (${createAttempts}/3)...`);
             await new Promise((r) => setTimeout(r, waitSec * 1000));
             continue;
           }
@@ -296,26 +304,26 @@ export default function ExecutionModal({
           if (json.removedAssets && json.removedAssets.length > 0 && json.renamedToDefault) {
             addLog(
               "warning",
-              `[Recreate ${j + 1}/${totalCount}] Created (Rank #${targetRank}) - Moderated name defaulted to "Avatar", and ${json.removedAssets.length} unwearable asset(s) skipped.`
+              `[Save] ${j + 1}/${totalCount}] Created (Rank #${targetRank}) - Moderated name defaulted to "Avatar", and ${json.removedAssets.length} unwearable asset(s) skipped.`
             );
           } else if (json.renamedToDefault) {
             addLog(
               "warning",
-              `[Recreate ${j + 1}/${totalCount}] Created (Rank #${targetRank}) - Original name was moderated, safely defaulted to "Avatar".`
+              `[Save] ${j + 1}/${totalCount}] Created (Rank #${targetRank}) - Original name was moderated, safely defaulted to "Avatar".`
             );
           } else if (json.removedAssets && json.removedAssets.length > 0) {
             addLog(
               "warning",
-              `[Recreate ${j + 1}/${totalCount}] Created (Rank #${targetRank}) - ${json.removedAssets.length} unwearable/deleted asset(s) skipped.`
+              `[Save] ${j + 1}/${totalCount}] Created (Rank #${targetRank}) - ${json.removedAssets.length} unwearable/deleted asset(s) skipped.`
             );
           } else {
-            addLog("success", `[Recreate ${j + 1}/${totalCount}] Created (Rank #${targetRank}).`);
+            addLog("success", `[Save] ${j + 1}/${totalCount}] Created (Rank #${targetRank}).`);
           }
           successfulCreations++;
         } catch (err) {
           const message = getErrorMessage(err, "Failed to create outfit.");
           if (createAttempts >= 3) {
-            addLog("error", `[Recreate ${j + 1}/${totalCount}] Failed after 3 attempts: ${message}`);
+            addLog("error", `[Save] ${j + 1}/${totalCount}] Failed after 3 attempts: ${message}`);
             failedList.push({ outfit, error: message });
             break;
           }
@@ -334,7 +342,7 @@ export default function ExecutionModal({
     }));
 
     if (failedList.length === 0) {
-      addLog("success", "Execution finished! All outfits reordered successfully.");
+      addLog("success", "Done. All outfits saved to Roblox.");
       onExecutionComplete();
     }
   };
@@ -357,8 +365,8 @@ export default function ExecutionModal({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
           <div>
-            <h3 className="text-base font-bold text-white tracking-tight">Execution Console</h3>
-            <p className="text-xs text-zinc-400 mt-0.5">Automated reverse recreation and order application</p>
+            <h3 className="text-base font-bold text-white tracking-tight">Save to Roblox</h3>
+            <p className="text-xs text-zinc-400 mt-0.5">Create or update outfits on your Roblox account</p>
           </div>
           {state.status === "idle" || state.status === "completed" || state.status === "error" ? (
             <button
@@ -375,12 +383,14 @@ export default function ExecutionModal({
           {!hasConfirmed ? (
             <div className="space-y-4">
               <p className="text-zinc-200 leading-relaxed text-sm">
-                The application will delete selected outfits and recreate them in the new order (bottom-to-top so #1 appears at the very top of your Roblox avatar inventory).
+                These outfits will be saved to your Roblox account. If outfits already exist there, they will be replaced first so this list can be saved.
               </p>
               <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl space-y-1.5 text-xs text-zinc-300">
-                <p className="text-white font-semibold text-xs">Automatic Backup Protection:</p>
+                <p className="text-white font-semibold text-xs">JSON backup</p>
                 <p className="text-zinc-400 leading-relaxed">
-                  A full JSON backup file containing all outfit IDs, colors, scales, and accessory configs will automatically download to your computer as soon as you press Start.
+                  {hasBackupThisSession
+                    ? "A JSON backup was already saved this session. No extra file will download."
+                    : "A JSON backup downloads only if outfits currently on Roblox will be deleted."}
                 </p>
               </div>
               <div className="flex justify-end gap-3 pt-2">
@@ -394,7 +404,7 @@ export default function ExecutionModal({
                   onClick={handleStartExecution}
                   className="px-5 py-2.5 text-sm font-semibold text-zinc-950 bg-white hover:bg-zinc-200 rounded-xl transition shadow-md cursor-pointer"
                 >
-                  Download Backup &amp; Start
+                  Start
                 </button>
               </div>
             </div>
@@ -448,7 +458,7 @@ export default function ExecutionModal({
                 <div className="p-4 bg-red-950/40 border border-red-800/60 rounded-xl space-y-2.5">
                   <div className="flex justify-between items-center">
                     <span className="font-semibold text-red-200 text-sm">
-                      {state.failedOutfits.length} outfits failed to recreate
+                      {state.failedOutfits.length} outfits failed to save
                     </span>
                     <button
                       onClick={onDownloadBackup}
@@ -472,9 +482,9 @@ export default function ExecutionModal({
               {state.status === "completed" && (
                 <div className="p-4 bg-zinc-900/80 border border-zinc-800 rounded-xl flex justify-between items-center">
                   <div>
-                    <p className="font-bold text-white text-sm">Execution Completed</p>
+                    <p className="font-bold text-white text-sm">Done</p>
                     <p className="text-xs text-zinc-400 mt-0.5">
-                      {state.successCount} outfits reordered successfully.
+                      {state.successCount} outfits saved to Roblox.
                     </p>
                   </div>
                   <a
@@ -496,7 +506,7 @@ export default function ExecutionModal({
                     onClick={handleAbort}
                     className="px-3.5 py-1.5 text-xs font-semibold text-red-400 hover:text-red-300 rounded-lg transition"
                   >
-                    Abort Execution
+                    Abort
                   </button>
                   <button
                     onClick={handlePauseToggle}

@@ -1,9 +1,8 @@
 "use client";
 
 import { getErrorMessage } from "@/lib/error-message";
-import { extractOutfitColors } from "@/lib/roblox-colors";
 import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
-import { ArrangedOutfit, RobloxUser } from "@/types/roblox";
+import { ArrangedOutfit } from "@/types/roblox";
 import { AlertTriangle, Loader2, Trash2, X } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
@@ -12,8 +11,9 @@ interface DeleteOutfitModalProps {
   isOpen: boolean;
   onClose: () => void;
   outfit: ArrangedOutfit | null;
-  user: RobloxUser | null;
   cookie: string;
+  hasBackupThisSession: boolean;
+  onDownloadBackupIfNeeded: () => boolean;
   onDeleted: (outfitId: number) => void;
 }
 
@@ -21,64 +21,15 @@ export default function DeleteOutfitModal({
   isOpen,
   onClose,
   outfit,
-  user,
   cookie,
+  hasBackupThisSession,
+  onDownloadBackupIfNeeded,
   onDeleted,
 }: DeleteOutfitModalProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   if (!isOpen || !outfit) return null;
-
-  const downloadOutfitBackup = () => {
-    const colors = extractOutfitColors(outfit.details || outfit);
-    const manifest = {
-      version: "1.0.0",
-      source: "Roblox Avatar Manager",
-      exportedAt: new Date().toISOString(),
-      user: {
-        id: user?.id || 0,
-        name: user?.name || "Anonymous",
-        displayName: user?.displayName || "Player",
-      },
-      totalOutfits: 1,
-      outfits: [
-        {
-          id: outfit.id,
-          name: outfit.name,
-          playerAvatarType: outfit.details?.playerAvatarType || "R15",
-          bodyColors: colors.bodyColors,
-          bodyColor3s: colors.bodyColor3s,
-          scale: outfit.details?.scale || {
-            height: 1,
-            width: 1,
-            head: 1,
-            depth: 1,
-            proportion: 0,
-            bodyType: 0,
-          },
-          assetIds: outfit.details?.assets?.map((asset) => asset.id) || [],
-          assets: outfit.details?.assets || [],
-          thumbnailUrl: outfit.thumbnailUrl,
-          orderIndex: 0,
-        },
-      ],
-    };
-
-    const blob = new Blob([JSON.stringify(manifest, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const safeName = outfit.name.replace(/[^\w.-]+/g, "-").slice(0, 40);
-    link.href = url;
-    link.download = `roblox-outfit-${safeName || outfit.id}-${dateStr}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
 
   const handleClose = () => {
     if (isDeleting) return;
@@ -91,7 +42,7 @@ export default function DeleteOutfitModal({
     setErrorMessage(null);
 
     try {
-      downloadOutfitBackup();
+      onDownloadBackupIfNeeded();
 
       const res = await fetch("/api/roblox/delete-outfit", {
         method: "POST",
@@ -141,7 +92,10 @@ export default function DeleteOutfitModal({
             <p className="text-zinc-200 leading-relaxed">
               This permanently deletes{" "}
               <strong className="text-white">{outfit.name}</strong> from your
-              Roblox account. A JSON backup of this avatar will download first.
+              Roblox account.
+              {hasBackupThisSession
+                ? " A JSON backup was already saved this session."
+                : " A JSON backup of your current list will download first."}
             </p>
           </div>
 

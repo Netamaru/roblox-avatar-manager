@@ -73,6 +73,7 @@ export default function HomePage() {
   const [deletingOutfit, setDeletingOutfit] =
     useState<ArrangedOutfit | null>(null);
   const [executionDelay, setExecutionDelay] = useState(1.5);
+  const [hasBackupThisSession, setHasBackupThisSession] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -207,6 +208,7 @@ export default function HomePage() {
     setUser(null);
     setCookie("");
     setOutfits([]);
+    setHasBackupThisSession(false);
     localStorage.removeItem("roblox_avatar_manager_cookie");
     localStorage.removeItem("roblox_arranger_cookie");
   };
@@ -402,6 +404,7 @@ export default function HomePage() {
   };
 
   const handleDownloadBackup = () => {
+    if (outfits.length === 0) return false;
     const manifest = {
       version: "1.0.0",
       source: "Roblox Avatar Manager",
@@ -450,6 +453,13 @@ export default function HomePage() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    setHasBackupThisSession(true);
+    return true;
+  };
+
+  const downloadBackupIfNeeded = () => {
+    if (hasBackupThisSession) return false;
+    return handleDownloadBackup();
   };
 
   const handleOutfitDeleted = (outfitId: number) => {
@@ -484,6 +494,7 @@ export default function HomePage() {
     imported: ArrangedOutfit[],
     replace: boolean,
   ) => {
+    setHasBackupThisSession(true);
     if (replace) {
       setOutfits(
         imported.map((item, idx) => ({
@@ -747,7 +758,7 @@ export default function HomePage() {
                       Notice: Detected {missingOutfitsCount} outfit{missingOutfitsCount === 1 ? "" : "s"} with deleted or unwearable items in the Roblox catalog.
                     </p>
                     <p className="text-amber-300/80 mt-0.5 text-xs leading-relaxed">
-                      Outfits highlighted with an amber border (&ldquo;Needs Fix&rdquo;) contain items that have been moderated or removed by Roblox. Our reordering process automatically skips missing items so your outfits are safely recreated without HTTP 400 errors.
+                      Outfits highlighted with an amber border (&ldquo;Needs Fix&rdquo;) contain items that have been moderated or removed by Roblox. Missing items are skipped when saving to Roblox.
                     </p>
                   </div>
                 </div>
@@ -918,7 +929,7 @@ export default function HomePage() {
                 Roblox Avatar Manager
               </h2>
               <p className="text-sm text-zinc-300 leading-relaxed max-w-md mx-auto">
-                Easily reorder, inspect, and manage your Roblox avatar costumes with seamless drag-and-drop.
+                Inspect, organize, and save Roblox avatar outfits.
               </p>
             </div>
 
@@ -940,7 +951,7 @@ export default function HomePage() {
               <ul className="space-y-1.5 text-zinc-400 bg-zinc-950/40 p-3.5 rounded-xl border border-zinc-800/50">
                 <li className="flex items-start gap-2">
                   <span className="text-emerald-400 font-bold">•</span>
-                  <span>Automatic JSON backup downloaded before any outfit is deleted</span>
+                  <span>JSON backup downloads once per session, only before outfits are deleted on Roblox</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-emerald-400 font-bold">•</span>
@@ -987,6 +998,7 @@ export default function HomePage() {
       {activeInspectingOutfit && (
         <OutfitDetailModal
           outfit={activeInspectingOutfit}
+          cookie={cookie}
           isFetchingDetails={isFetchingDetails}
           onClose={() => setInspectingOutfit(null)}
           onPatch={(o) => {
@@ -1003,6 +1015,7 @@ export default function HomePage() {
         outfits={outfits}
         user={user}
         onImportOutfits={handleImportOutfits}
+        onBackupCreated={() => setHasBackupThisSession(true)}
         onFetchMissingDetails={async () => {
           if (cookie) await fetchFullDetailsInBackground(cookie, outfits, user?.id);
         }}
@@ -1014,8 +1027,9 @@ export default function HomePage() {
           isOpen={!!deletingOutfit}
           onClose={() => setDeletingOutfit(null)}
           outfit={outfits.find((o) => o.id === deletingOutfit.id) || deletingOutfit}
-          user={user}
           cookie={cookie}
+          hasBackupThisSession={hasBackupThisSession}
+          onDownloadBackupIfNeeded={downloadBackupIfNeeded}
           onDeleted={handleOutfitDeleted}
         />
       )}
@@ -1042,7 +1056,6 @@ export default function HomePage() {
           setExecutionDelay(delay);
           setIsExecutionOpen(true);
         }}
-        onDownloadBackup={handleDownloadBackup}
       />
 
       <ExecutionModal
@@ -1052,6 +1065,8 @@ export default function HomePage() {
         user={user}
         cookie={cookie}
         delaySeconds={executionDelay}
+        hasBackupThisSession={hasBackupThisSession}
+        onDownloadBackupIfNeeded={downloadBackupIfNeeded}
         onDownloadBackup={handleDownloadBackup}
         onExecutionComplete={() => {
           if (cookie) {
@@ -1075,7 +1090,8 @@ export default function HomePage() {
         user={user}
         cookie={cookie}
         delaySeconds={executionDelay}
-        onDownloadBackup={handleDownloadBackup}
+        hasBackupThisSession={hasBackupThisSession}
+        onDownloadBackupIfNeeded={downloadBackupIfNeeded}
         onDeletionComplete={() => {
           if (cookie) handleAuthWithCookie(cookie, false);
         }}

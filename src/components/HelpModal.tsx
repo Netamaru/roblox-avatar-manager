@@ -36,7 +36,7 @@ export default function HelpModal({ isOpen, onClose }: HelpModalProps) {
           <div className="space-y-1.5">
             <h4 className="font-semibold text-white">2. Data Safety & Backup</h4>
             <p className="text-zinc-400 text-sm">
-              Before any outfit is deleted, the app automatically downloads a full JSON backup to your computer. All outfit names, equipped asset IDs, body color IDs, and scaling values are preserved.
+              A JSON backup downloads at most once per session, and only when outfits on Roblox are about to be deleted. Importing a JSON file also counts as already having a backup. Outfit names, equipped asset IDs, body colors, and scales are preserved in that file. Manual Export is always available.
             </p>
           </div>
 

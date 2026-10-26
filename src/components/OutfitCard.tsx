@@ -217,7 +217,7 @@ export default function OutfitCard({
               {hasMissing && (
                 <span
                   className="flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/50 shrink-0"
-                  title={`${missingCount} item(s) deleted or unwearable (automatically skipped during reorder)`}
+                  title={`${missingCount} item(s) deleted or unwearable (skipped when saving to Roblox)`}
                 >
                   <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
                   <span>Missing {missingCount}</span>
@@ -545,7 +545,7 @@ export default function OutfitCard({
             {hasMissing && (
               <span
                 className="flex items-center gap-1 text-[11px] font-semibold text-amber-400 bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0"
-                title={`${missingCount} item(s) deleted from Roblox catalog (automatically skipped during reorder)`}
+                title={`${missingCount} item(s) deleted from Roblox catalog (skipped when saving to Roblox)`}
               >
                 <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
                 <span>{missingCount} missing</span>
