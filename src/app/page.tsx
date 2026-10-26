@@ -2,15 +2,19 @@
 
 import BulkDeleteModal from "@/components/BulkDeleteModal";
 import CookieModal from "@/components/CookieModal";
+import DeleteOutfitModal from "@/components/DeleteOutfitModal";
 import DryRunModal from "@/components/DryRunModal";
 import ExecutionModal from "@/components/ExecutionModal";
 import ExportImportModal from "@/components/ExportImportModal";
 import HelpModal from "@/components/HelpModal";
 import Navbar from "@/components/Navbar";
 import OutfitCard from "@/components/OutfitCard";
+import WorkspaceSkeleton from "@/components/WorkspaceSkeleton";
 import OutfitDetailModal from "@/components/OutfitDetailModal";
 import PatchOutfitModal from "@/components/PatchOutfitModal";
 import { extractOutfitColors } from "@/lib/roblox-colors";
+import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
+import { getErrorMessage } from "@/lib/error-message";
 import { ArrangedOutfit, RobloxUser } from "@/types/roblox";
 import {
   AlertTriangle,
@@ -26,13 +30,16 @@ import {
   Trash2,
 } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export default function HomePage() {
   const [cookie, setCookie] = useState("");
   const [user, setUser] = useState<RobloxUser | null>(null);
   const [outfits, setOutfits] = useState<ArrangedOutfit[]>([]);
   const [isLoadingOutfits, setIsLoadingOutfits] = useState(false);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
+  const [isFetchingDetails, setIsFetchingDetails] = useState(false);
+  const [detailsPendingCount, setDetailsPendingCount] = useState(0);
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -63,16 +70,9 @@ export default function HomePage() {
     useState<ArrangedOutfit | null>(null);
   const [patchingOutfit, setPatchingOutfit] =
     useState<ArrangedOutfit | null>(null);
+  const [deletingOutfit, setDeletingOutfit] =
+    useState<ArrangedOutfit | null>(null);
   const [executionDelay, setExecutionDelay] = useState(1.5);
-
-  useEffect(() => {
-    const savedCookie =
-      localStorage.getItem("roblox_avatar_manager_cookie") ||
-      localStorage.getItem("roblox_arranger_cookie");
-    if (savedCookie) {
-      handleAuthWithCookie(savedCookie, false);
-    }
-  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -85,66 +85,16 @@ export default function HomePage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const handleAuthWithCookie = async (
-    rawCookie: string,
-    save = true,
-  ): Promise<boolean> => {
-    setAuthError(null);
-    setIsLoadingOutfits(true);
-
-    try {
-      const authRes = await fetch("/api/roblox/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cookie: rawCookie }),
-      });
-
-      const authData = await authRes.json();
-      if (!authRes.ok)
-        throw new Error(authData.error || "Failed to verify account.");
-
-      setCookie(rawCookie);
-      setUser(authData.user);
-      if (save) {
-        localStorage.setItem("roblox_avatar_manager_cookie", rawCookie);
-      }
-
-      const outfitRes = await fetch("/api/roblox/outfits", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cookie: rawCookie, userId: authData.user.id }),
-      });
-
-      const outfitData = await outfitRes.json();
-      if (!outfitRes.ok)
-        throw new Error(outfitData.error || "Failed to load outfits.");
-
-      const initialOutfits: ArrangedOutfit[] = outfitData.outfits.map(
-        (o: any, idx: number) => ({
-          ...o,
-          originalIndex: idx,
-          currentIndex: idx,
-        }),
-      );
-
-      setOutfits(initialOutfits);
-      setIsLoadingOutfits(false);
-
-      fetchFullDetailsInBackground(rawCookie, initialOutfits);
-      return true;
-    } catch (err: any) {
-      setAuthError(err.message);
-      setIsLoadingOutfits(false);
-      return false;
-    }
-  };
-
-  const fetchFullDetailsInBackground = async (
+  const fetchFullDetailsInBackground = useCallback(async (
     activeCookie: string,
     items: ArrangedOutfit[],
+    userId?: number,
   ) => {
     const missing = items.filter((o) => !o.details);
     if (missing.length === 0) return;
+
+    setIsFetchingDetails(true);
+    setDetailsPendingCount(missing.length);
 
     try {
       const batchRes = await fetch("/api/roblox/outfit-details", {
@@ -152,7 +102,7 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cookie: activeCookie,
-          userId: user?.id,
+          userId,
           outfitIds: missing.map((m) => m.id),
         }),
       });
@@ -173,8 +123,85 @@ export default function HomePage() {
       }
     } catch (err) {
       console.warn("Background fetch details failed", err);
+    } finally {
+      setIsFetchingDetails(false);
+      setDetailsPendingCount(0);
     }
-  };
+  }, []);
+
+  const handleAuthWithCookie = useCallback(async (
+    rawCookie: string,
+    save = true,
+  ): Promise<boolean> => {
+    setAuthError(null);
+    setIsLoadingOutfits(true);
+
+    try {
+      const authRes = await fetch("/api/roblox/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cookie: rawCookie }),
+      });
+
+      const authData = (await authRes.json()) as { error?: string; user?: RobloxUser };
+      if (!authRes.ok || !authData.user)
+        throw new Error(authData.error || "Failed to verify account.");
+
+      setCookie(rawCookie);
+      setUser(authData.user);
+      if (save) {
+        localStorage.setItem("roblox_avatar_manager_cookie", rawCookie);
+      }
+
+      const outfitRes = await fetch("/api/roblox/outfits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cookie: rawCookie, userId: authData.user.id }),
+      });
+
+      const outfitData = (await outfitRes.json()) as {
+        error?: string;
+        outfits?: ArrangedOutfit[];
+      };
+      if (!outfitRes.ok)
+        throw new Error(outfitData.error || "Failed to load outfits.");
+
+      const initialOutfits: ArrangedOutfit[] = (outfitData.outfits ?? []).map(
+        (outfit, idx) => ({
+          ...outfit,
+          originalIndex: idx,
+          currentIndex: idx,
+        }),
+      );
+
+      setOutfits(initialOutfits);
+      setIsLoadingOutfits(false);
+
+      void fetchFullDetailsInBackground(rawCookie, initialOutfits, authData.user.id);
+      return true;
+    } catch (err) {
+      setAuthError(getErrorMessage(err, "Failed to verify account."));
+      setIsLoadingOutfits(false);
+      return false;
+    }
+  }, [fetchFullDetailsInBackground]);
+
+  useEffect(() => {
+    const savedCookie =
+      localStorage.getItem("roblox_avatar_manager_cookie") ||
+      localStorage.getItem("roblox_arranger_cookie");
+    const timer = window.setTimeout(() => {
+      if (!savedCookie) {
+        setIsRestoringSession(false);
+        return;
+      }
+      void handleAuthWithCookie(savedCookie, false).then((ok) => {
+        setIsRestoringSession(false);
+        if (!ok) setIsAuthOpen(true);
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [handleAuthWithCookie]);
 
   const handleDisconnect = () => {
     setUser(null);
@@ -425,6 +452,25 @@ export default function HomePage() {
     URL.revokeObjectURL(url);
   };
 
+  const handleOutfitDeleted = (outfitId: number) => {
+    setOutfits((prev) =>
+      prev
+        .filter((item) => item.id !== outfitId)
+        .map((item, idx) => ({
+          ...item,
+          currentIndex: idx,
+          originalIndex: idx,
+        })),
+    );
+    if (inspectingOutfit?.id === outfitId) {
+      setInspectingOutfit(null);
+    }
+    if (patchingOutfit?.id === outfitId) {
+      setPatchingOutfit(null);
+    }
+    setDeletingOutfit(null);
+  };
+
   const handleOutfitPatched = (updatedOutfit: ArrangedOutfit) => {
     setOutfits((prev) =>
       prev.map((o) => (o.id === updatedOutfit.id ? { ...o, ...updatedOutfit } : o))
@@ -491,14 +537,16 @@ export default function HomePage() {
 
   const hasOrderChanged = outfits.some((o, i) => o.originalIndex !== i);
   const activeCount = outfits.filter((o) => !o.isExcluded).length;
+  const isInitialLoad =
+    isRestoringSession || (isLoadingOutfits && outfits.length === 0);
+  const showWorkspace = Boolean(user) && !isInitialLoad;
 
   return (
     <div className="min-h-screen flex flex-col bg-zinc-950 text-zinc-100">
       {/* Navbar */}
       <Navbar
-        user={user}
+        user={showWorkspace ? user : null}
         outfitsCount={outfits.length}
-        onOpenAuth={() => setIsAuthOpen(true)}
         onDisconnect={handleDisconnect}
         onOpenExport={() => {
           setExportImportTab("export");
@@ -518,10 +566,12 @@ export default function HomePage() {
       {/* Main Container */}
       <main
         className={`flex-1 w-full mx-auto px-4 sm:px-6 ${
-          user ? "max-w-7xl py-6" : "flex items-center justify-center py-12"
+          showWorkspace || isInitialLoad
+            ? "max-w-7xl py-6"
+            : "flex items-center justify-center py-12"
         }`}
       >
-        {user ? (
+        {showWorkspace ? (
           /* CONNECTED WORKSPACE */
           <div className="space-y-5">
             {/* Account & Stats Bar */}
@@ -530,7 +580,7 @@ export default function HomePage() {
                 <div className="relative w-12 h-12 rounded-full overflow-hidden bg-zinc-800 shrink-0 ring-1 ring-zinc-700">
                   {user.avatarUrl ? (
                     <Image
-                      src={user.avatarUrl}
+                      src={hdThumbnailUrl(user.avatarUrl)}
                       alt={user.name}
                       fill
                       className="object-cover"
@@ -594,6 +644,17 @@ export default function HomePage() {
                 </button>
               </div>
             </div>
+
+            {isFetchingDetails && detailsPendingCount > 0 && (
+              <div className="flex items-center gap-3 p-3.5 rounded-xl border border-sky-800/60 bg-sky-950/30 text-sky-100">
+                <Loader2 className="w-4.5 h-4.5 text-sky-400 animate-spin shrink-0" />
+                <p className="text-sm">
+                  Loading item details for{" "}
+                  <strong className="text-white font-semibold">{detailsPendingCount}</strong>{" "}
+                  outfit{detailsPendingCount === 1 ? "" : "s"}...
+                </p>
+              </div>
+            )}
 
             {/* Toolbar: Search, Sorters, View Switcher */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
@@ -784,6 +845,8 @@ export default function HomePage() {
                       onInspect={(o) => setInspectingOutfit(o)}
                       onToggleExclude={handleToggleExclude}
                       onPatch={(o) => setPatchingOutfit(o)}
+                      onDelete={(o) => setDeletingOutfit(o)}
+                      isFetchingDetails={isFetchingDetails}
                       onDragStart={handleDragStart}
                       onDragOver={handleDragOver}
                       onDragEnd={handleDragEnd}
@@ -831,6 +894,8 @@ export default function HomePage() {
                       onInspect={(o) => setInspectingOutfit(o)}
                       onToggleExclude={handleToggleExclude}
                       onPatch={(o) => setPatchingOutfit(o)}
+                      onDelete={(o) => setDeletingOutfit(o)}
+                      isFetchingDetails={isFetchingDetails}
                       onDragStart={handleDragStart}
                       onDragOver={handleDragOver}
                       onDragEnd={handleDragEnd}
@@ -843,6 +908,8 @@ export default function HomePage() {
               </div>
             )}
           </div>
+        ) : isInitialLoad ? (
+          <WorkspaceSkeleton />
         ) : (
           /* SIMPLE CLEAN LOGIN CARD */
           <div className="w-full max-w-lg p-8 rounded-2xl border border-zinc-800 bg-zinc-900/70 backdrop-blur-md shadow-2xl space-y-6 text-center">
@@ -920,6 +987,7 @@ export default function HomePage() {
       {activeInspectingOutfit && (
         <OutfitDetailModal
           outfit={activeInspectingOutfit}
+          isFetchingDetails={isFetchingDetails}
           onClose={() => setInspectingOutfit(null)}
           onPatch={(o) => {
             setInspectingOutfit(null);
@@ -936,12 +1004,25 @@ export default function HomePage() {
         user={user}
         onImportOutfits={handleImportOutfits}
         onFetchMissingDetails={async () => {
-          if (cookie) await fetchFullDetailsInBackground(cookie, outfits);
+          if (cookie) await fetchFullDetailsInBackground(cookie, outfits, user?.id);
         }}
       />
 
+      {deletingOutfit && (
+        <DeleteOutfitModal
+          key={deletingOutfit.id}
+          isOpen={!!deletingOutfit}
+          onClose={() => setDeletingOutfit(null)}
+          outfit={outfits.find((o) => o.id === deletingOutfit.id) || deletingOutfit}
+          user={user}
+          cookie={cookie}
+          onDeleted={handleOutfitDeleted}
+        />
+      )}
+
       {patchingOutfit && (
         <PatchOutfitModal
+          key={patchingOutfit.id}
           isOpen={!!patchingOutfit}
           onClose={() => setPatchingOutfit(null)}
           outfit={outfits.find((o) => o.id === patchingOutfit.id) || patchingOutfit}

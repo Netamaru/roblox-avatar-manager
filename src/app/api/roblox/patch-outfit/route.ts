@@ -1,4 +1,7 @@
-import { getOutfitDetails, patchOutfit } from "@/lib/roblox-server";
+import { getErrorMessage } from "@/lib/error-message";
+import { assetIdOf } from "@/lib/outfit-json";
+import { getOutfitDetails, getOutfitThumbnails, patchOutfit } from "@/lib/roblox-server";
+import { OutfitWritePayload } from "@/types/roblox";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
@@ -31,15 +34,20 @@ export async function POST(req: NextRequest) {
     // Custom name takes precedence, followed by payload name, followed by "Avatar"
     const finalName = (name || payload.name || "Avatar").trim();
 
+    const typedPayload = payload as OutfitWritePayload;
     const patchPayload = {
       name: finalName,
-      bodyColors: payload.bodyColors,
-      bodyColor3s: payload.bodyColor3s,
+      bodyColors: typedPayload.bodyColors,
+      bodyColor3s: typedPayload.bodyColor3s,
       assetIds:
-        payload.assetIds ||
-        (payload.assets ? payload.assets.map((a: any) => (typeof a === "number" ? a : a.id)) : []),
-      assets: payload.assets,
-      scale: payload.scale || {
+        typedPayload.assetIds ||
+        (typedPayload.assets
+          ? typedPayload.assets
+              .map((asset) => assetIdOf(asset))
+              .filter((id): id is number => id !== undefined)
+          : []),
+      assets: typedPayload.assets,
+      scale: typedPayload.scale || {
         height: 1,
         width: 1,
         head: 1,
@@ -47,24 +55,15 @@ export async function POST(req: NextRequest) {
         proportion: 0,
         bodyType: 0,
       },
-      playerAvatarType: payload.playerAvatarType || "R15",
+      playerAvatarType: typedPayload.playerAvatarType || "R15",
     };
 
     const result = await patchOutfit(cookie, numericOutfitId, patchPayload, csrfToken);
 
-    // Fetch updated thumbnail
     let thumbnailUrl: string | undefined;
     try {
-      const thumbRes = await fetch(
-        `https://thumbnails.roblox.com/v1/users/outfits?userOutfitIds=${numericOutfitId}&size=150x150&format=Png&isCircular=false`,
-        { cache: "no-store" }
-      );
-      if (thumbRes.ok) {
-        const thumbJson = await thumbRes.json();
-        if (thumbJson.data && thumbJson.data.length > 0) {
-          thumbnailUrl = thumbJson.data[0].imageUrl;
-        }
-      }
+      const thumbnailMap = await getOutfitThumbnails([numericOutfitId]);
+      thumbnailUrl = thumbnailMap[numericOutfitId];
     } catch {
       // ignore thumbnail error
     }
@@ -86,9 +85,9 @@ export async function POST(req: NextRequest) {
       thumbnailUrl,
       details: updatedDetails,
     });
-  } catch (err: any) {
+  } catch (err) {
     return NextResponse.json(
-      { error: err.message || "Failed to patch outfit." },
+      { error: getErrorMessage(err, "Failed to patch outfit.") },
       { status: 500 }
     );
   }

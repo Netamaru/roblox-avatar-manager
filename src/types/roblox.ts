@@ -1,3 +1,5 @@
+export const AVATAR_NAME_MAX_LENGTH = 100;
+
 export interface RobloxUser {
   id: number;
   name: string;
@@ -15,6 +17,7 @@ export interface RobloxAssetMeta {
   position?: { X: number; Y: number; Z: number };
   rotation?: { X: number; Y: number; Z: number };
   scale?: { X: number; Y: number; Z: number };
+  version?: number;
 }
 
 export interface RobloxAsset {
@@ -56,6 +59,33 @@ export interface RobloxOutfitDetail {
   playerAvatarType: "R6" | "R15" | string;
   isEditable?: boolean;
   missingAssetIds?: number[];
+}
+
+export interface OutfitColorSource {
+  bodyColors?: Partial<RobloxBodyColors> | null;
+  bodyColor3s?: Record<string, string | number> | null;
+  details?: {
+    bodyColors?: Partial<RobloxBodyColors> | null;
+    bodyColor3s?: Record<string, string | number> | null;
+  } | null;
+  headColorId?: number;
+  headColor3?: string;
+}
+
+export interface OutfitWritePayload {
+  name: string;
+  bodyColors?: RobloxBodyColors;
+  bodyColor3s?: Record<string, string>;
+  assetIds?: number[];
+  assets?: RobloxAsset[];
+  scale?: RobloxScale;
+  playerAvatarType?: string;
+}
+
+export interface RobloxApiError {
+  code?: number;
+  message?: string;
+  fieldData?: string | number;
 }
 
 export interface ArrangedOutfit {

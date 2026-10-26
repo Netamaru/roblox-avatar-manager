@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@/lib/error-message";
 import { deleteOutfit } from "@/lib/roblox-server";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -15,9 +16,9 @@ export async function POST(req: NextRequest) {
 
     const result = await deleteOutfit(cookie, Number(outfitId), csrfToken);
     return NextResponse.json({ ...result });
-  } catch (err: any) {
+  } catch (err) {
     return NextResponse.json(
-      { error: err.message || "Failed to delete outfit." },
+      { error: getErrorMessage(err, "Failed to delete outfit.") },
       { status: 500 }
     );
   }

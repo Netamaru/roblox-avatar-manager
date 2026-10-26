@@ -1,5 +1,56 @@
-import { RobloxAsset, RobloxBodyColors, RobloxOutfitDetail, RobloxScale, RobloxUser } from "@/types/roblox";
 import { extractOutfitColors, normalizeBodyColor3s } from "@/lib/roblox-colors";
+import { avatarHeadshotApiUrl, hdThumbnailUrl, outfitThumbnailsApiUrl } from "@/lib/roblox-thumbnails";
+import {
+  OutfitWritePayload,
+  RobloxApiError,
+  RobloxAsset,
+  RobloxOutfitDetail,
+  RobloxUser,
+} from "@/types/roblox";
+
+interface RobloxOutfitListItem {
+  id: number;
+  name: string;
+  isEditable?: boolean;
+  outfitType?: string | number;
+}
+
+interface ThumbnailItem {
+  targetId?: number;
+  imageUrl?: string;
+}
+
+interface OutfitDetailsResponse {
+  id?: number;
+  name?: string;
+  assets?: unknown[];
+  bodyColors?: RobloxOutfitDetail["bodyColors"];
+  bodyColor3s?: Record<string, string>;
+  scale?: RobloxOutfitDetail["scale"];
+  playerAvatarType?: string;
+  isEditable?: boolean;
+}
+
+function toPatchAssets(assets: RobloxAsset[]): Array<{
+  id: number;
+  meta?: RobloxAsset["meta"];
+}> {
+  return assets.map((asset) => ({
+    id: asset.id,
+    ...(asset.meta
+      ? { meta: { ...asset.meta, version: asset.meta.version || 1 } }
+      : {}),
+  }));
+}
+
+function parseRobloxErrors(errorText: string): RobloxApiError[] {
+  try {
+    const parsed = JSON.parse(errorText) as { errors?: RobloxApiError[] };
+    return parsed.errors ?? [];
+  } catch {
+    return [];
+  }
+}
 
 const ROBLOX_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
 
@@ -43,13 +94,13 @@ export async function getAuthenticatedUser(cookie: string): Promise<RobloxUser> 
 
   try {
     const thumbRes = await fetch(
-      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${user.id}&size=150x150&format=Png&isCircular=false`,
+      avatarHeadshotApiUrl(user.id),
       { cache: "no-store" }
     );
     if (thumbRes.ok) {
       const thumbData = await thumbRes.json();
       if (thumbData.data && thumbData.data.length > 0 && thumbData.data[0].imageUrl) {
-        user.avatarUrl = thumbData.data[0].imageUrl;
+        user.avatarUrl = hdThumbnailUrl(thumbData.data[0].imageUrl);
       }
     }
   } catch (err) {
@@ -85,11 +136,11 @@ export async function getUserOutfits(cookie: string, userId: number) {
       throw new Error(`Failed to fetch outfits (HTTP ${res.status}): ${res.statusText}`);
     }
 
-    const json = await res.json();
+    const json = (await res.json()) as { data?: RobloxOutfitListItem[] };
     const list = json.data || [];
 
     // Strictly filter to ONLY user-created saved avatar outfits
-    const userCreatedOutfits = list.filter((item: any) => {
+    const userCreatedOutfits = list.filter((item) => {
       // Must be editable (excludes purchased packages, catalog bundles, and preset avatar items)
       if (item.isEditable !== true) return false;
       // Must be an avatar outfit (excludes dynamic heads, shoes, makeup items, etc.)
@@ -122,14 +173,14 @@ export async function getOutfitThumbnails(outfitIds: number[]) {
   for (let i = 0; i < outfitIds.length; i += batchSize) {
     const batch = outfitIds.slice(i, i + batchSize);
     try {
-      const url = `https://thumbnails.roblox.com/v1/users/outfits?userOutfitIds=${batch.join(",")}&size=150x150&format=Png&isCircular=false`;
+      const url = outfitThumbnailsApiUrl(batch);
       const res = await fetch(url, { cache: "no-store" });
       if (res.ok) {
-        const json = await res.json();
+        const json = (await res.json()) as { data?: ThumbnailItem[] };
         const data = json.data || [];
         for (const item of data) {
           if (item.targetId && item.imageUrl) {
-            thumbnailMap[item.targetId] = item.imageUrl;
+            thumbnailMap[item.targetId] = hdThumbnailUrl(item.imageUrl);
           }
         }
       }
@@ -206,21 +257,37 @@ export async function getOutfitDetails(
     }).catch(() => null),
   ]);
 
-  const v3Data = v3Res && v3Res.ok ? await v3Res.json() : null;
-  const v1Data = v1Res && v1Res.ok ? await v1Res.json() : null;
+  const v3Data: OutfitDetailsResponse | null =
+    v3Res && v3Res.ok ? ((await v3Res.json()) as OutfitDetailsResponse) : null;
+  const v1Data: OutfitDetailsResponse | null =
+    v1Res && v1Res.ok ? ((await v1Res.json()) as OutfitDetailsResponse) : null;
 
   if (!v3Data && !v1Data) {
     throw new Error(`Failed to fetch outfit details for outfit #${outfitId}`);
   }
 
-  const base = v3Data || v1Data;
+  const base = v3Data ?? v1Data;
+  if (!base) {
+    throw new Error(`Failed to fetch outfit details for outfit #${outfitId}`);
+  }
   const rawAssets = v3Data?.assets || v1Data?.assets || [];
-  const assets: RobloxAsset[] = rawAssets.map((a: any) => ({
-    id: a.id,
-    name: a.name,
-    assetType: a.assetType,
-    meta: a.meta,
-  }));
+  const assets: RobloxAsset[] = [];
+  for (const asset of rawAssets) {
+    if (typeof asset !== "object" || asset === null) continue;
+    const rec = asset as {
+      id?: number;
+      name?: string;
+      assetType?: RobloxAsset["assetType"];
+      meta?: RobloxAsset["meta"];
+    };
+    if (typeof rec.id !== "number") continue;
+    assets.push({
+      id: rec.id,
+      name: rec.name || `Asset ${rec.id}`,
+      assetType: rec.assetType || { id: 0, name: "Asset" },
+      ...(rec.meta ? { meta: rec.meta } : {}),
+    });
+  }
 
   // Resolve user ID for ownership check
   let currentUserId = userId;
@@ -253,8 +320,8 @@ export async function getOutfitDetails(
   });
 
   return {
-    id: base.id,
-    name: base.name,
+    id: base.id ?? outfitId,
+    name: base.name ?? `Outfit #${outfitId}`,
     assets,
     missingAssetIds: missingAssetIds.length > 0 ? missingAssetIds : undefined,
     bodyColors,
@@ -346,15 +413,7 @@ export async function deleteOutfit(cookie: string, outfitId: number, csrfToken?:
  */
 export async function createOutfit(
   cookie: string,
-  payload: {
-    name: string;
-    bodyColors?: RobloxBodyColors;
-    bodyColor3s?: Record<string, string>;
-    assetIds: number[];
-    assets?: any[];
-    scale: RobloxScale;
-    playerAvatarType: string;
-  },
+  payload: OutfitWritePayload & { assetIds: number[]; scale: NonNullable<OutfitWritePayload["scale"]>; playerAvatarType: string },
   csrfToken?: string
 ) {
   const sanitized = cleanCookie(cookie);
@@ -406,7 +465,7 @@ export async function createOutfit(
   if (!listRes.ok) {
     throw new Error(`Failed to retrieve newly created outfit ID (HTTP ${listRes.status})`);
   }
-  const listJson = await listRes.json();
+  const listJson = (await listRes.json()) as { data?: RobloxOutfitListItem[] };
   const createdOutfit = listJson.data?.[0];
   if (!createdOutfit?.id) {
     throw new Error("Newly created outfit not found in user outfits list.");
@@ -432,15 +491,7 @@ export async function createOutfit(
 export async function patchOutfit(
   cookie: string,
   outfitId: number,
-  payload: {
-    name: string;
-    bodyColors?: RobloxBodyColors;
-    bodyColor3s?: Record<string, string>;
-    assetIds?: number[];
-    assets?: any[];
-    scale?: RobloxScale;
-    playerAvatarType?: string;
-  },
+  payload: OutfitWritePayload,
   csrfToken?: string
 ) {
   const sanitized = cleanCookie(cookie);
@@ -448,10 +499,7 @@ export async function patchOutfit(
 
   let currentAssets =
     payload.assets && payload.assets.length > 0
-      ? payload.assets.map((a: any) => ({
-          id: a.id,
-          ...(a.meta ? { meta: { ...a.meta, version: a.meta.version || 1 } } : {}),
-        }))
+      ? toPatchAssets(payload.assets)
       : (payload.assetIds || []).map((id) => ({ id }));
 
   let patchRes: Response | null = null;
@@ -465,7 +513,7 @@ export async function patchOutfit(
   while (maxRetries > 0) {
     maxRetries--;
 
-    const patchBody: any = {
+    const patchBody = {
       name: currentOutfitName,
       playerAvatarType: payload.playerAvatarType || "R15",
       scale: payload.scale || {
@@ -510,16 +558,11 @@ export async function patchOutfit(
     }
 
     const errorText = await patchRes.text().catch(() => "");
-    let errorJson: any = null;
-    try {
-      errorJson = JSON.parse(errorText);
-    } catch {
-      // not JSON
-    }
+    const errors = parseRobloxErrors(errorText);
 
     // Check if error is due to an invalid / moderated outfit name (Roblox error code 4)
-    const invalidNameError = errorJson?.errors?.find(
-      (e: any) =>
+    const invalidNameError = errors.find(
+      (e) =>
         e.code === 4 ||
         e.message?.toLowerCase().includes("invalid outfit name") ||
         e.message?.toLowerCase().includes("name is invalid")
@@ -532,8 +575,8 @@ export async function patchOutfit(
     }
 
     // Check if error is due to an unwearable / deleted asset (Roblox error code 5)
-    const unwearableError = errorJson?.errors?.find(
-      (e: any) => e.code === 5 || e.message?.toLowerCase().includes("not wearable")
+    const unwearableError = errors.find(
+      (e) => e.code === 5 || e.message?.toLowerCase().includes("not wearable")
     );
 
     if (unwearableError && unwearableError.fieldData) {

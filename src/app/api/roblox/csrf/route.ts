@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@/lib/error-message";
 import { getCsrfToken } from "@/lib/roblox-server";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -12,9 +13,9 @@ export async function POST(req: NextRequest) {
 
     const csrfToken = await getCsrfToken(cookie);
     return NextResponse.json({ success: true, csrfToken });
-  } catch (err: any) {
+  } catch (err) {
     return NextResponse.json(
-      { error: err.message || "Failed to obtain CSRF token." },
+      { error: getErrorMessage(err, "Failed to obtain CSRF token.") },
       { status: 500 }
     );
   }

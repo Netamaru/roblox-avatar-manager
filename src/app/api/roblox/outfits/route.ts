@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@/lib/error-message";
 import { getAuthenticatedUser, getOutfitThumbnails, getUserOutfits } from "@/lib/roblox-server";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -30,9 +31,9 @@ export async function POST(req: NextRequest) {
     }));
 
     return NextResponse.json({ success: true, count: outfits.length, outfits });
-  } catch (err: any) {
+  } catch (err) {
     return NextResponse.json(
-      { error: err.message || "Failed to fetch Roblox outfits." },
+      { error: getErrorMessage(err, "Failed to fetch Roblox outfits.") },
       { status: 500 }
     );
   }

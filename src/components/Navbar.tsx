@@ -1,13 +1,12 @@
 "use client";
 
+import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
 import { RobloxUser } from "@/types/roblox";
 import {
   ArrowDownUp,
   Download,
   HelpCircle,
-  KeyRound,
   LogOut,
-  Play,
   RotateCcw,
   Save,
   TestTube2,
@@ -18,7 +17,6 @@ import Image from "next/image";
 interface NavbarProps {
   user: RobloxUser | null;
   outfitsCount: number;
-  onOpenAuth: () => void;
   onDisconnect: () => void;
   onOpenExport: () => void;
   onOpenImport: () => void;
@@ -32,7 +30,6 @@ interface NavbarProps {
 export default function Navbar({
   user,
   outfitsCount,
-  onOpenAuth,
   onDisconnect,
   onOpenExport,
   onOpenImport,
@@ -121,7 +118,7 @@ export default function Navbar({
                 {user.avatarUrl ? (
                   <div className="relative w-6 h-6 rounded-full overflow-hidden bg-zinc-800 ring-1 ring-zinc-700">
                     <Image
-                      src={user.avatarUrl}
+                      src={hdThumbnailUrl(user.avatarUrl)}
                       alt={user.name}
                       fill
                       className="object-cover"

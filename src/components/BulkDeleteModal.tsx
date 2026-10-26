@@ -1,5 +1,7 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/error-message";
+import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
 import { ArrangedOutfit, ExecutionLogEntry, RobloxUser } from "@/types/roblox";
 import { AlertTriangle, Pause, Play, Trash2, X } from "lucide-react";
 import Image from "next/image";
@@ -35,7 +37,6 @@ export default function BulkDeleteModal({
   const [currentStep, setCurrentStep] = useState(0);
   const [currentItemName, setCurrentItemName] = useState("");
   const [logs, setLogs] = useState<ExecutionLogEntry[]>([]);
-  const [failedOutfits, setFailedOutfits] = useState<Array<{ outfit: ArrangedOutfit; error: string }>>([]);
 
   const isPausedRef = useRef(false);
   const isAbortedRef = useRef(false);
@@ -50,21 +51,23 @@ export default function BulkDeleteModal({
     }
   }, [logs]);
 
-  useEffect(() => {
-    if (!isOpen) {
-      setHasConfirmed(false);
-      setConfirmInput("");
-      setIsDeleting(false);
-      setIsPaused(false);
-      setIsCompleted(false);
-      setCurrentStep(0);
-      setCurrentItemName("");
-      setLogs([]);
-      setFailedOutfits([]);
-      isPausedRef.current = false;
-      isAbortedRef.current = false;
-    }
-  }, [isOpen]);
+  const resetState = () => {
+    setHasConfirmed(false);
+    setConfirmInput("");
+    setIsDeleting(false);
+    setIsPaused(false);
+    setIsCompleted(false);
+    setCurrentStep(0);
+    setCurrentItemName("");
+    setLogs([]);
+    isPausedRef.current = false;
+    isAbortedRef.current = false;
+  };
+
+  const handleClose = () => {
+    resetState();
+    onClose();
+  };
 
   if (!isOpen) return null;
 
@@ -95,8 +98,8 @@ export default function BulkDeleteModal({
       });
       const csrfJson = await csrfRes.json();
       if (csrfJson.csrfToken) csrfToken = csrfJson.csrfToken;
-    } catch (e: any) {
-      addLog("warning", "CSRF fallback: " + e.message);
+    } catch (e) {
+      addLog("warning", "CSRF fallback: " + getErrorMessage(e, "unknown error"));
     }
 
     const failedList: Array<{ outfit: ArrangedOutfit; error: string }> = [];
@@ -151,10 +154,11 @@ export default function BulkDeleteModal({
           deleteSuccess = true;
           deletedCount++;
           addLog("success", `[Delete ${i + 1}/${totalCount}] Deleted from Roblox.`);
-        } catch (err: any) {
+        } catch (err) {
+          const message = getErrorMessage(err, "Failed to delete outfit.");
           if (deleteAttempts >= 3) {
-            addLog("error", `[Delete ${i + 1}/${totalCount}] Failed: ${err.message}`);
-            failedList.push({ outfit, error: err.message });
+            addLog("error", `[Delete ${i + 1}/${totalCount}] Failed: ${message}`);
+            failedList.push({ outfit, error: message });
             break;
           }
           await new Promise((r) => setTimeout(r, 2000));
@@ -166,7 +170,6 @@ export default function BulkDeleteModal({
 
     setIsDeleting(false);
     setIsCompleted(true);
-    setFailedOutfits(failedList);
 
     if (failedList.length === 0) {
       addLog("success", `🎉 Completed! ${deletedCount} outfits were permanently deleted from Roblox.`);
@@ -201,7 +204,7 @@ export default function BulkDeleteModal({
           </div>
           {!isDeleting && (
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="p-1.5 text-zinc-400 hover:text-white rounded-lg transition"
             >
               <X className="w-5 h-5" />
@@ -245,7 +248,7 @@ export default function BulkDeleteModal({
                       <div className="relative w-8 h-8 rounded-lg bg-zinc-800 shrink-0 overflow-hidden">
                         {o.thumbnailUrl ? (
                           <Image
-                            src={o.thumbnailUrl}
+                            src={hdThumbnailUrl(o.thumbnailUrl)}
                             alt={o.name}
                             fill
                             className="object-contain p-0.5"
@@ -280,7 +283,7 @@ export default function BulkDeleteModal({
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleClose}
                   className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white rounded-lg transition"
                 >
                   Cancel
@@ -367,7 +370,7 @@ export default function BulkDeleteModal({
               {isCompleted && (
                 <div className="flex justify-end pt-2 border-t border-zinc-800">
                   <button
-                    onClick={onClose}
+                    onClick={handleClose}
                     className="px-5 py-2 text-sm font-semibold bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl transition cursor-pointer"
                   >
                     Close

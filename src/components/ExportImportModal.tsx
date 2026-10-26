@@ -1,7 +1,9 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/error-message";
+import { importOutfitsFromJson } from "@/lib/outfit-json";
 import { extractOutfitColors } from "@/lib/roblox-colors";
-import { ArrangedOutfit, ExportManifest, RobloxAsset, RobloxUser } from "@/types/roblox";
+import { ArrangedOutfit, ExportManifest, RobloxUser } from "@/types/roblox";
 import { AlertTriangle, Check, Clipboard, Download, Loader2, RefreshCw, Upload, X } from "lucide-react";
 import { useState } from "react";
 
@@ -100,8 +102,8 @@ export default function ExportImportModal({
       try {
         const text = event.target?.result as string;
         parseAndPreviewJson(text);
-      } catch (err: any) {
-        setImportError("Failed to read file: " + err.message);
+      } catch (err) {
+        setImportError("Failed to read file: " + getErrorMessage(err, "Could not read file."));
       }
     };
     reader.readAsText(file);
@@ -110,67 +112,9 @@ export default function ExportImportModal({
   const parseAndPreviewJson = (raw: string) => {
     setImportError(null);
     try {
-      const parsed = JSON.parse(raw);
-      let list: any[] = [];
-
-      if (parsed.outfits && Array.isArray(parsed.outfits)) {
-        list = parsed.outfits;
-      } else if (Array.isArray(parsed)) {
-        list = parsed;
-      } else {
-        throw new Error("Invalid JSON format. Expected an 'outfits' array.");
-      }
-
-      const formatted: ArrangedOutfit[] = list.map((item, idx) => {
-        const details = item.details || item;
-        const rawAssets = details.assets || [];
-        const rawAssetIds: number[] = details.assetIds || [];
-
-        let assets: RobloxAsset[] = [];
-        if (Array.isArray(rawAssets) && rawAssets.length > 0) {
-          assets = rawAssets.map((a: any) => ({
-            id: typeof a === "number" ? a : a.id,
-            name: a.name || `Asset ${typeof a === "number" ? a : a.id}`,
-            assetType: a.assetType || { id: 0, name: "Asset" },
-            meta: a.meta,
-          }));
-        } else if (Array.isArray(rawAssetIds) && rawAssetIds.length > 0) {
-          assets = rawAssetIds.map((id: number) => ({
-            id,
-            name: `Asset ${id}`,
-            assetType: { id: 0, name: "Asset" },
-          }));
-        }
-
-        return {
-          id: item.id || Math.floor(10000000 + Math.random() * 90000000),
-          name: item.name || `Outfit #${idx + 1}`,
-          thumbnailUrl: item.thumbnailUrl,
-          originalIndex: idx,
-          currentIndex: idx,
-          isLoaded: true,
-          details: {
-            id: item.id,
-            name: item.name,
-            playerAvatarType: details.playerAvatarType || "R15",
-            bodyColors: extractOutfitColors(details).bodyColors,
-            bodyColor3s: extractOutfitColors(details).bodyColor3s,
-            scale: details.scale || {
-              height: 1,
-              width: 1,
-              head: 1,
-              depth: 1,
-              proportion: 0,
-              bodyType: 0,
-            },
-            assets,
-          },
-        };
-      });
-
-      setImportPreview(formatted);
-    } catch (err: any) {
-      setImportError(err.message || "Invalid JSON structure.");
+      setImportPreview(importOutfitsFromJson(raw));
+    } catch (err) {
+      setImportError(getErrorMessage(err, "Invalid JSON structure."));
       setImportPreview(null);
     }
   };

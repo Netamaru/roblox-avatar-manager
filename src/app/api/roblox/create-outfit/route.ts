@@ -1,5 +1,8 @@
-import { createOutfit } from "@/lib/roblox-server";
+import { getErrorMessage } from "@/lib/error-message";
+import { assetIdOf } from "@/lib/outfit-json";
 import { extractOutfitColors } from "@/lib/roblox-colors";
+import { createOutfit } from "@/lib/roblox-server";
+import { OutfitWritePayload } from "@/types/roblox";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
@@ -14,15 +17,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { bodyColors, bodyColor3s } = extractOutfitColors(outfit);
+    const typedOutfit = outfit as OutfitWritePayload & { assetIds?: number[] };
+    const { bodyColors, bodyColor3s } = extractOutfitColors(typedOutfit);
+    const assets = Array.isArray(typedOutfit.assets) ? typedOutfit.assets : undefined;
+    const assetIds =
+      typedOutfit.assetIds ||
+      (assets
+        ? assets.map((asset) => assetIdOf(asset)).filter((id): id is number => id !== undefined)
+        : []);
 
     const payload = {
-      name: outfit.name?.trim() || "Avatar",
+      name: typedOutfit.name?.trim() || "Avatar",
       bodyColors,
       bodyColor3s,
-      assetIds: outfit.assetIds || (outfit.assets ? outfit.assets.map((a: any) => a.id) : []),
-      assets: outfit.assets || undefined,
-      scale: outfit.scale || {
+      assetIds,
+      assets,
+      scale: typedOutfit.scale || {
         height: 1,
         width: 1,
         head: 1,
@@ -30,14 +40,14 @@ export async function POST(req: NextRequest) {
         proportion: 0,
         bodyType: 0,
       },
-      playerAvatarType: outfit.playerAvatarType || "R15",
+      playerAvatarType: typedOutfit.playerAvatarType || "R15",
     };
 
     const result = await createOutfit(cookie, payload, csrfToken);
     return NextResponse.json({ ...result });
-  } catch (err: any) {
+  } catch (err) {
     return NextResponse.json(
-      { error: err.message || "Failed to create new outfit." },
+      { error: getErrorMessage(err, "Failed to create new outfit.") },
       { status: 500 }
     );
   }

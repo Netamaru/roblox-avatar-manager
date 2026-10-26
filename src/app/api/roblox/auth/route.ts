@@ -1,3 +1,4 @@
+import { getErrorMessage } from "@/lib/error-message";
 import { getAuthenticatedUser } from "@/lib/roblox-server";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -12,9 +13,9 @@ export async function POST(req: NextRequest) {
 
     const user = await getAuthenticatedUser(cookie);
     return NextResponse.json({ success: true, user });
-  } catch (err: any) {
+  } catch (err) {
     return NextResponse.json(
-      { error: err.message || "Failed to verify Roblox account." },
+      { error: getErrorMessage(err, "Failed to verify Roblox account.") },
       { status: 401 }
     );
   }

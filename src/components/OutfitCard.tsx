@@ -1,5 +1,7 @@
 "use client";
 
+import PulseSkeleton from "@/components/PulseSkeleton";
+import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
 import { ArrangedOutfit } from "@/types/roblox";
 import {
   AlertTriangle,
@@ -11,6 +13,8 @@ import {
   EyeOff,
   FileCode,
   GripVertical,
+  Loader2,
+  Trash2,
   User,
 } from "lucide-react";
 import Image from "next/image";
@@ -30,6 +34,8 @@ interface OutfitCardProps {
   onInspect: (outfit: ArrangedOutfit) => void;
   onToggleExclude: (id: number) => void;
   onPatch?: (outfit: ArrangedOutfit) => void;
+  onDelete: (outfit: ArrangedOutfit) => void;
+  isFetchingDetails?: boolean;
   onDragStart: (e: React.DragEvent, id: number) => void;
   onDragOver: (e: React.DragEvent, id: number) => void;
   onDragEnd: (e: React.DragEvent) => void;
@@ -51,6 +57,8 @@ export default function OutfitCard({
   onInspect,
   onToggleExclude,
   onPatch,
+  onDelete,
+  isFetchingDetails = false,
   onDragStart,
   onDragOver,
   onDragEnd,
@@ -63,10 +71,12 @@ export default function OutfitCard({
 
   const isExcluded = !!outfit.isExcluded;
   const isPositionChanged = outfit.originalIndex !== actualIndex;
-  const rigType = outfit.details?.playerAvatarType || "R15";
-  const missingCount =
-    outfit.details?.missingAssetIds?.length ?? (outfit.hasMissingItems ? 1 : 0);
-  const hasMissing = missingCount > 0;
+  const rigType = outfit.details?.playerAvatarType;
+  const missingCount = outfit.details?.missingAssetIds?.length ?? 0;
+  const hasMissing = !!(
+    outfit.details && (missingCount > 0 || outfit.hasMissingItems)
+  );
+  const isLoadingDetails = isFetchingDetails && !outfit.details;
 
   const handleJumpSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,12 +99,12 @@ export default function OutfitCard({
           isDragging
             ? "opacity-30 border-dashed border-sky-500 bg-sky-950/20 scale-[0.99]"
             : dropIndicator
-            ? "border-sky-500 ring-2 ring-sky-500/50 bg-sky-950/25 shadow-md"
-            : isExcluded
-            ? "opacity-40 border-zinc-900 bg-zinc-950"
-            : hasMissing
-            ? "border-amber-500/70 bg-amber-950/20 hover:bg-amber-950/30 hover:border-amber-400 ring-1 ring-amber-500/30"
-            : "border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900 hover:border-zinc-700"
+              ? "border-sky-500 ring-2 ring-sky-500/50 bg-sky-950/25 shadow-md"
+              : isExcluded
+                ? "opacity-40 border-zinc-900 bg-zinc-950"
+                : hasMissing
+                  ? "border-amber-500/70 bg-amber-950/20 hover:bg-amber-950/30 hover:border-amber-400 ring-1 ring-amber-500/30"
+                  : "border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900 hover:border-zinc-700"
         }`}
       >
         {/* Insertion Indicator Bars */}
@@ -174,7 +184,7 @@ export default function OutfitCard({
           <div className="relative w-11 h-11 rounded-lg bg-zinc-950 border border-zinc-800 shrink-0 overflow-hidden">
             {outfit.thumbnailUrl ? (
               <Image
-                src={outfit.thumbnailUrl}
+                src={hdThumbnailUrl(outfit.thumbnailUrl)}
                 alt={outfit.name}
                 fill
                 className="object-contain p-1"
@@ -187,11 +197,18 @@ export default function OutfitCard({
                 <User className="w-5 h-5" />
               </div>
             )}
+            {isLoadingDetails && (
+              <div className="absolute inset-0 bg-zinc-950/70 flex items-center justify-center">
+                <Loader2 className="w-4 h-4 text-sky-400 animate-spin" />
+              </div>
+            )}
           </div>
 
           <div className="min-w-0 truncate">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-zinc-100 truncate">{outfit.name}</span>
+              <span className="text-sm font-semibold text-zinc-100 truncate">
+                {outfit.name}
+              </span>
               {actualIndex === 0 && (
                 <span className="text-xs px-1.5 py-0.5 rounded-md bg-zinc-800 text-zinc-200 font-semibold">
                   Top
@@ -208,9 +225,15 @@ export default function OutfitCard({
               )}
             </div>
             <div className="flex items-center gap-2 text-xs text-zinc-400 mt-0.5">
-              <span className="font-medium">{rigType}</span>
+              {isLoadingDetails ? (
+                <PulseSkeleton className="h-3 w-8" />
+              ) : rigType ? (
+                <span className="font-medium">{rigType}</span>
+              ) : null}
               {isPositionChanged && (
-                <span className="text-zinc-500">• Original: #{outfit.originalIndex + 1}</span>
+                <span className="text-zinc-500">
+                  • Original: #{outfit.originalIndex + 1}
+                </span>
               )}
             </div>
           </div>
@@ -266,17 +289,15 @@ export default function OutfitCard({
           >
             <Eye className="w-4 h-4" />
           </button>
-          {onPatch && (
-            <button
-              type="button"
-              draggable={false}
-              onClick={() => onPatch(outfit)}
-              className="p-1.5 text-sky-400 hover:text-sky-200 hover:bg-sky-950/60 rounded-lg transition cursor-pointer"
-              title="Update from JSON (Patch avatar)"
-            >
-              <FileCode className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            type="button"
+            draggable={false}
+            onClick={() => onDelete(outfit)}
+            className="p-1.5 text-zinc-400 hover:text-red-300 hover:bg-red-950/50 rounded-lg transition cursor-pointer"
+            title="Delete from Roblox"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
           <button
             type="button"
             draggable={false}
@@ -307,12 +328,12 @@ export default function OutfitCard({
         isDragging
           ? "opacity-30 border-dashed border-sky-500 bg-sky-950/20 scale-[0.98]"
           : dropIndicator
-          ? "border-sky-500 ring-2 ring-sky-500/50 bg-sky-950/20 shadow-lg"
-          : isExcluded
-          ? "opacity-40 border-zinc-900 bg-zinc-950"
-          : hasMissing
-          ? "border-amber-500/70 bg-gradient-to-b from-amber-950/20 via-zinc-900/70 to-zinc-900/90 hover:border-amber-400 ring-1 ring-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.08)]"
-          : "border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900 hover:border-zinc-700 hover:shadow-lg"
+            ? "border-sky-500 ring-2 ring-sky-500/50 bg-sky-950/20 shadow-lg"
+            : isExcluded
+              ? "opacity-40 border-zinc-900 bg-zinc-950"
+              : hasMissing
+                ? "border-amber-500/70 bg-gradient-to-b from-amber-950/20 via-zinc-900/70 to-zinc-900/90 hover:border-amber-400 ring-1 ring-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.08)]"
+                : "border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900 hover:border-zinc-700 hover:shadow-lg"
       }`}
     >
       {/* Insertion Indicator Bars */}
@@ -407,17 +428,15 @@ export default function OutfitCard({
               (orig #{outfit.originalIndex + 1})
             </span>
           )}
-          {onPatch && (
-            <button
-              type="button"
-              draggable={false}
-              onClick={() => onPatch(outfit)}
-              className="p-1 text-sky-400 hover:text-sky-200 hover:bg-sky-950/60 rounded-md transition cursor-pointer"
-              title="Update from JSON (Patch avatar)"
-            >
-              <FileCode className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            type="button"
+            draggable={false}
+            onClick={() => onDelete(outfit)}
+            className="p-1 text-zinc-400 hover:text-red-300 hover:bg-red-950/50 rounded-md transition cursor-pointer"
+            title="Delete from Roblox"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
           <button
             type="button"
             draggable={false}
@@ -444,7 +463,7 @@ export default function OutfitCard({
 
         {outfit.thumbnailUrl ? (
           <Image
-            src={outfit.thumbnailUrl}
+            src={hdThumbnailUrl(outfit.thumbnailUrl)}
             alt={outfit.name}
             fill
             className="object-contain p-2 transition-transform duration-200 group-hover:scale-105"
@@ -458,8 +477,17 @@ export default function OutfitCard({
           </div>
         )}
 
+        {isLoadingDetails && (
+          <div className="absolute inset-0 bg-zinc-950/55 flex flex-col items-center justify-center gap-1.5 z-[5]">
+            <Loader2 className="w-6 h-6 text-sky-400 animate-spin" />
+            <span className="text-[11px] font-medium text-sky-200">
+              Loading items...
+            </span>
+          </div>
+        )}
+
         <div
-          className="absolute inset-0 bg-zinc-950/75 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 backdrop-blur-[2px] p-2"
+          className="absolute inset-0 bg-zinc-950/75 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 backdrop-blur-[2px] p-2 z-10"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <button
@@ -479,22 +507,41 @@ export default function OutfitCard({
               title="Update avatar from JSON"
             >
               <FileCode className="w-3.5 h-3.5 text-sky-400" />
-              <span>Patch JSON</span>
+              <span>Edit</span>
             </button>
           )}
+          <button
+            type="button"
+            draggable={false}
+            onClick={() => onDelete(outfit)}
+            className="w-full max-w-[125px] py-1.5 text-xs font-semibold text-red-200 bg-red-950/90 hover:bg-red-900 rounded-lg border border-red-800/80 shadow-md transition flex items-center justify-center gap-1 text-center cursor-pointer"
+            title="Permanently delete this avatar from Roblox"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-red-400" />
+            <span>Delete</span>
+          </button>
         </div>
       </div>
 
       {/* Info */}
       <div className="p-3.5 flex-1 flex flex-col justify-between">
         <div>
-          <p className="font-semibold text-sm text-zinc-100 truncate" title={outfit.name}>
+          <p
+            className="font-semibold text-sm text-zinc-100 truncate"
+            title={outfit.name}
+          >
             {outfit.name}
           </p>
           <div className="flex items-center justify-between gap-1.5 mt-1">
-            <span className="text-xs text-zinc-400 font-medium inline-block">
-              {rigType}
-            </span>
+            {isLoadingDetails ? (
+              <PulseSkeleton className="h-3 w-8" />
+            ) : rigType ? (
+              <span className="text-xs text-zinc-400 font-medium inline-block">
+                {rigType}
+              </span>
+            ) : (
+              <span />
+            )}
             {hasMissing && (
               <span
                 className="flex items-center gap-1 text-[11px] font-semibold text-amber-400 bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0"

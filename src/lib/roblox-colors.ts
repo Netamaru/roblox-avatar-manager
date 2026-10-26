@@ -1,4 +1,4 @@
-import { RobloxBodyColors } from "@/types/roblox";
+import { OutfitColorSource, RobloxBodyColors } from "@/types/roblox";
 
 // Standard Roblox BrickColor Palette mapping: ID -> { name, hex, rgb }
 export const ROBLOX_BRICK_COLORS: Record<
@@ -170,8 +170,8 @@ export function hexToClosestBrickColorId(hex: string | undefined | null): number
  * If bodyColor3s is missing or has missing keys, falls back to bodyColors BrickColor IDs.
  */
 export function normalizeBodyColor3s(
-  rawColor3s?: Record<string, any> | null,
-  fallbackBrickColors?: RobloxBodyColors | null
+  rawColor3s?: Record<string, string | number> | null,
+  fallbackBrickColors?: Partial<RobloxBodyColors> | null
 ): Record<string, string> {
   const fallback = fallbackBrickColors || {
     headColorId: DEFAULT_SKIN_BRICK_ID,
@@ -215,7 +215,7 @@ export function normalizeBodyColor3s(
  */
 export function normalizeBodyColors(
   rawBodyColors?: Partial<RobloxBodyColors> | null,
-  bodyColor3s?: Record<string, any> | null
+  bodyColor3s?: Record<string, string | number> | null
 ): RobloxBodyColors {
   const getPartId = (
     keys: (keyof RobloxBodyColors)[],
@@ -253,7 +253,7 @@ export function normalizeBodyColors(
  * Universal color extractor that extracts BOTH complete bodyColors and bodyColor3s
  * from any outfit object, detail payload, export manifest, or API response.
  */
-export function extractOutfitColors(target: any): {
+export function extractOutfitColors(target?: OutfitColorSource | null): {
   bodyColors: RobloxBodyColors;
   bodyColor3s: Record<string, string>;
 } {
@@ -263,15 +263,17 @@ export function extractOutfitColors(target: any): {
     return { bodyColors, bodyColor3s };
   }
 
-  const rawColors =
+  const rawColors: Partial<RobloxBodyColors> | null =
     target.bodyColors ||
     target.details?.bodyColors ||
-    (target.headColorId ? target : null);
+    (typeof target.headColorId === "number"
+      ? { headColorId: target.headColorId }
+      : null);
 
-  const rawColor3s =
+  const rawColor3s: Record<string, string | number> | null =
     target.bodyColor3s ||
     target.details?.bodyColor3s ||
-    (target.headColor3 ? target : null);
+    (target.headColor3 ? { headColor3: target.headColor3 } : null);
 
   const bodyColor3s = normalizeBodyColor3s(rawColor3s, rawColors);
   const bodyColors = normalizeBodyColors(rawColors, bodyColor3s);

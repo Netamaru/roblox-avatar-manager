@@ -1,7 +1,19 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/error-message";
+import {
+  ParsedOutfitCandidate,
+  parseOutfitCandidates,
+} from "@/lib/outfit-json";
+import PulseSkeleton from "@/components/PulseSkeleton";
 import { extractOutfitColors, formatCssHex } from "@/lib/roblox-colors";
-import { ArrangedOutfit, RobloxOutfitDetail } from "@/types/roblox";
+import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
+import {
+  ArrangedOutfit,
+  AVATAR_NAME_MAX_LENGTH,
+  RobloxOutfitDetail,
+  RobloxScale,
+} from "@/types/roblox";
 import {
   AlertCircle,
   Check,
@@ -12,13 +24,12 @@ import {
   Palette,
   RotateCcw,
   Sliders,
-  Sparkles,
   Upload,
   User,
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface PatchOutfitModalProps {
   isOpen: boolean;
@@ -27,18 +38,6 @@ interface PatchOutfitModalProps {
   cookie: string;
   userId?: number;
   onOutfitPatched: (updatedOutfit: ArrangedOutfit) => void;
-}
-
-interface ParsedCandidate {
-  id?: number;
-  name?: string;
-  thumbnailUrl?: string;
-  playerAvatarType?: string;
-  bodyColors?: any;
-  bodyColor3s?: any;
-  scale?: any;
-  assets?: any[];
-  assetIds?: number[];
 }
 
 export default function PatchOutfitModal({
@@ -50,135 +49,74 @@ export default function PatchOutfitModal({
   onOutfitPatched,
 }: PatchOutfitModalProps) {
   const [jsonText, setJsonText] = useState("");
-  const [customName, setCustomName] = useState("");
-  const [parseError, setParseError] = useState<string | null>(null);
-  const [candidates, setCandidates] = useState<ParsedCandidate[]>([]);
-  const [selectedIndex, setSelectedIndex] = useState<number>(0);
-
-  const [currentDetails, setCurrentDetails] = useState<RobloxOutfitDetail | null>(
-    outfit?.details || null
+  const [customName, setCustomName] = useState(outfit?.name || "");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [detailsLoadSettled, setDetailsLoadSettled] = useState(
+    Boolean(outfit?.details),
   );
-  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+
+  const [currentDetails, setCurrentDetails] =
+    useState<RobloxOutfitDetail | null>(outfit?.details || null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
-  // Track the ID of the outfit for which the modal was initialized to avoid resetting typing
-  const initializedOutfitIdRef = useRef<number | null>(null);
+  const waitingForDetails =
+    isOpen &&
+    !!outfit &&
+    !outfit.details &&
+    !currentDetails &&
+    !!cookie &&
+    !detailsLoadSettled;
+  const isLoadingDetails = waitingForDetails;
 
-  // Initialize state ONLY when modal is newly opened or outfit ID changes
   useEffect(() => {
-    if (isOpen && outfit) {
-      if (initializedOutfitIdRef.current !== outfit.id) {
-        initializedOutfitIdRef.current = outfit.id;
-        setCustomName(outfit.name || "");
-        setJsonText("");
-        setParseError(null);
-        setCandidates([]);
-        setSelectedIndex(0);
-        setSubmitError(null);
-        setSubmitSuccess(null);
-        setCurrentDetails(outfit.details || null);
-      }
-    } else {
-      initializedOutfitIdRef.current = null;
-    }
-  }, [isOpen, outfit?.id, outfit?.name, outfit?.details]);
+    if (!waitingForDetails || !outfit) return;
+    let cancelled = false;
 
-  // If the outfit doesn't have full details loaded yet, fetch them in the background
-  useEffect(() => {
-    if (isOpen && outfit && !outfit.details && !currentDetails && cookie) {
-      setIsLoadingDetails(true);
-      fetch("/api/roblox/outfit-details", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cookie,
-          outfitId: outfit.id,
-          userId,
-        }),
+    fetch("/api/roblox/outfit-details", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cookie,
+        outfitId: outfit.id,
+        userId,
+      }),
+    })
+      .then((res) => res.json() as Promise<{ details?: RobloxOutfitDetail }>)
+      .then((data) => {
+        if (!cancelled && data.details) {
+          setCurrentDetails(data.details);
+        }
       })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.details) {
-            setCurrentDetails(data.details);
-          }
-        })
-        .catch((err) => {
-          console.warn("Failed to fetch outfit details in PatchOutfitModal", err);
-        })
-        .finally(() => {
-          setIsLoadingDetails(false);
-        });
-    }
-  }, [isOpen, outfit?.id, outfit?.details, currentDetails, cookie, userId]);
-
-  // Parse JSON text whenever it changes
-  useEffect(() => {
-    const trimmed = jsonText.trim();
-    if (!trimmed) {
-      setParseError(null);
-      setCandidates([]);
-      setSelectedIndex(0);
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(trimmed);
-      let list: any[] = [];
-
-      if (parsed.outfits && Array.isArray(parsed.outfits)) {
-        list = parsed.outfits;
-      } else if (Array.isArray(parsed)) {
-        list = parsed;
-      } else if (typeof parsed === "object" && parsed !== null) {
-        list = [parsed];
-      } else {
-        throw new Error("Invalid JSON: Expected an outfit object or array.");
-      }
-
-      if (list.length === 0) {
-        throw new Error("JSON does not contain any outfit data.");
-      }
-
-      const formattedCandidates: ParsedCandidate[] = list.map((item, idx) => {
-        const details = item.details || item;
-        return {
-          id: item.id || details.id,
-          name: item.name || details.name || `Outfit #${idx + 1}`,
-          thumbnailUrl: item.thumbnailUrl || details.thumbnailUrl,
-          playerAvatarType: details.playerAvatarType || "R15",
-          bodyColors: details.bodyColors,
-          bodyColor3s: details.bodyColor3s,
-          scale: details.scale,
-          assets: details.assets,
-          assetIds:
-            details.assetIds ||
-            (details.assets
-              ? details.assets.map((a: any) => (typeof a === "number" ? a : a.id))
-              : []),
-        };
+      .catch((err) => {
+        console.warn("Failed to fetch outfit details in PatchOutfitModal", err);
+      })
+      .finally(() => {
+        if (!cancelled) setDetailsLoadSettled(true);
       });
 
-      setCandidates(formattedCandidates);
-      setSelectedIndex(0);
-      setParseError(null);
+    return () => {
+      cancelled = true;
+    };
+  }, [waitingForDetails, outfit, cookie, userId]);
 
-      // Pre-fill custom name from parsed candidate
-      const initialCandidate = formattedCandidates[0];
-      if (initialCandidate?.name) {
-        setCustomName(initialCandidate.name);
-      }
-    } catch (err: any) {
-      setParseError(err.message || "Failed to parse JSON.");
-      setCandidates([]);
-      setSelectedIndex(0);
+  const parsedJson = useMemo(() => parseOutfitCandidates(jsonText), [jsonText]);
+  const candidates = parsedJson.candidates;
+  const parseError = parsedJson.error;
+
+  const applyJsonText = (text: string) => {
+    setJsonText(text);
+    const parsed = parseOutfitCandidates(text);
+    if (parsed.candidates[0]?.name) {
+      setCustomName(parsed.candidates[0].name);
     }
-  }, [jsonText]);
+    setSelectedIndex(0);
+  };
 
   // Current outfit candidate (used if JSON is empty, e.g. for renaming only)
-  const currentCandidate = useMemo<ParsedCandidate>(() => {
+  const currentCandidate = useMemo<ParsedOutfitCandidate>(() => {
     const details = currentDetails || outfit?.details;
     const colors = extractOutfitColors(details || outfit);
     const rawAssets = details?.assets || [];
@@ -198,17 +136,14 @@ export default function PatchOutfitModal({
         bodyType: 0,
       },
       assets: rawAssets,
-      assetIds:
-        rawAssets.length > 0
-          ? rawAssets.map((a: any) => (typeof a === "number" ? a : a.id))
-          : (details as any)?.assetIds || [],
+      assetIds: rawAssets.map((asset) => asset.id),
     };
   }, [outfit, currentDetails, customName]);
 
   const isJsonProvided = jsonText.trim().length > 0;
 
   // Active candidate: uses parsed candidate if JSON is provided, otherwise falls back to current outfit
-  const activeCandidate = useMemo<ParsedCandidate>(() => {
+  const activeCandidate = useMemo<ParsedOutfitCandidate>(() => {
     if (isJsonProvided && candidates.length > 0) {
       return candidates[selectedIndex] || candidates[0];
     }
@@ -223,16 +158,24 @@ export default function PatchOutfitModal({
 
   const resolvedAssetsCount = useMemo(() => {
     if (!activeCandidate) return 0;
-    if (Array.isArray(activeCandidate.assets) && activeCandidate.assets.length > 0) {
+    if (
+      Array.isArray(activeCandidate.assets) &&
+      activeCandidate.assets.length > 0
+    ) {
       return activeCandidate.assets.length;
     }
-    if (Array.isArray(activeCandidate.assetIds) && activeCandidate.assetIds.length > 0) {
+    if (
+      Array.isArray(activeCandidate.assetIds) &&
+      activeCandidate.assetIds.length > 0
+    ) {
       return activeCandidate.assetIds.length;
     }
     return 0;
   }, [activeCandidate]);
 
   if (!isOpen || !outfit) return null;
+
+  const showAppearanceSkeleton = isLoadingDetails && !isJsonProvided;
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -242,7 +185,7 @@ export default function PatchOutfitModal({
     reader.onload = (event) => {
       const text = event.target?.result as string;
       if (text) {
-        setJsonText(text);
+        applyJsonText(text);
       }
     };
     reader.readAsText(file);
@@ -252,7 +195,7 @@ export default function PatchOutfitModal({
     try {
       const text = await navigator.clipboard.readText();
       if (text) {
-        setJsonText(text);
+        applyJsonText(text);
       }
     } catch {
       // ignore clipboard permission error
@@ -273,18 +216,19 @@ export default function PatchOutfitModal({
     setSubmitSuccess(null);
 
     try {
-      const finalName = customName.trim() || activeCandidate.name || outfit.name || "Avatar";
+      const finalName =
+        customName.trim() || activeCandidate.name || outfit.name || "Avatar";
       const payload = {
         name: finalName,
         playerAvatarType: activeCandidate.playerAvatarType || "R15",
-        scale: activeCandidate.scale || {
+        scale: (activeCandidate.scale || {
           height: 1,
           width: 1,
           head: 1,
           depth: 1,
           proportion: 0,
           bodyType: 0,
-        },
+        }) as RobloxScale,
         assets: activeCandidate.assets,
         assetIds: activeCandidate.assetIds,
         bodyColors: resolvedColors.bodyColors,
@@ -305,13 +249,15 @@ export default function PatchOutfitModal({
 
       const json = await res.json();
       if (!res.ok) {
-        throw new Error(json.error || `Failed to update outfit (HTTP ${res.status})`);
+        throw new Error(
+          json.error || `Failed to update outfit (HTTP ${res.status})`,
+        );
       }
 
       setSubmitSuccess(
         isJsonProvided
           ? `Outfit #${outfit.id} successfully updated with new appearance!`
-          : `Outfit #${outfit.id} renamed to "${finalName}" on Roblox!`
+          : `Outfit #${outfit.id} renamed to "${finalName}" on Roblox!`,
       );
 
       // Prepare updated ArrangedOutfit object
@@ -347,8 +293,8 @@ export default function PatchOutfitModal({
       setTimeout(() => {
         onClose();
       }, 1000);
-    } catch (err: any) {
-      setSubmitError(err.message || "Failed to update outfit.");
+    } catch (err) {
+      setSubmitError(getErrorMessage(err, "Failed to update outfit."));
     } finally {
       setIsSubmitting(false);
     }
@@ -376,7 +322,8 @@ export default function PatchOutfitModal({
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Update name or patch appearance directly from JSON on your Roblox account
+                Update name or patch appearance directly from JSON on your
+                Roblox account
               </p>
             </div>
           </div>
@@ -397,7 +344,7 @@ export default function PatchOutfitModal({
               <div className="relative w-12 h-12 rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0 flex items-center justify-center">
                 {outfit.thumbnailUrl ? (
                   <Image
-                    src={outfit.thumbnailUrl}
+                    src={hdThumbnailUrl(outfit.thumbnailUrl)}
                     alt={outfit.name}
                     fill
                     className="object-contain p-1"
@@ -408,17 +355,26 @@ export default function PatchOutfitModal({
                 )}
               </div>
               <div className="min-w-0">
-                <span className="text-xs text-zinc-400 font-medium block">Target Avatar</span>
-                <p className="text-sm font-semibold text-zinc-100 truncate">{outfit.name}</p>
+                <span className="text-xs text-zinc-400 font-medium block">
+                  Target Avatar
+                </span>
+                <p className="text-sm font-semibold text-zinc-100 truncate">
+                  {outfit.name}
+                </p>
                 <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-400">
                   <span className="font-mono">ID: #{outfit.id}</span>
                   <span>•</span>
-                  <span>{activeCandidate.playerAvatarType || "R15"}</span>
+                  {showAppearanceSkeleton ? (
+                    <PulseSkeleton className="h-3 w-8 align-middle" />
+                  ) : (
+                    <span>{activeCandidate.playerAvatarType}</span>
+                  )}
                   {isLoadingDetails && (
                     <>
                       <span>•</span>
                       <span className="text-sky-400 flex items-center gap-1">
-                        <Loader2 className="w-3 h-3 animate-spin" /> Loading details...
+                        <Loader2 className="w-3 h-3 animate-spin" /> Loading
+                        details...
                       </span>
                     </>
                   )}
@@ -440,7 +396,9 @@ export default function PatchOutfitModal({
                 className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5"
               >
                 <span>Avatar Name</span>
-                <span className="text-zinc-500 font-normal">(Customizable)</span>
+                <span className="text-zinc-500 font-normal">
+                  (Customizable)
+                </span>
               </label>
               <div className="flex items-center gap-2">
                 {customName !== outfit.name && (
@@ -454,8 +412,14 @@ export default function PatchOutfitModal({
                     <span>Reset original</span>
                   </button>
                 )}
-                <span className="text-[11px] font-mono text-zinc-500">
-                  {customName.length}/50
+                <span
+                  className={`text-[11px] font-mono ${
+                    customName.length >= AVATAR_NAME_MAX_LENGTH
+                      ? "text-amber-400"
+                      : "text-zinc-500"
+                  }`}
+                >
+                  {customName.length}/{AVATAR_NAME_MAX_LENGTH}
                 </span>
               </div>
             </div>
@@ -464,7 +428,7 @@ export default function PatchOutfitModal({
               name="patchAvatarName"
               type="text"
               autoComplete="off"
-              maxLength={50}
+              maxLength={AVATAR_NAME_MAX_LENGTH}
               value={customName}
               onChange={(e) => setCustomName(e.target.value)}
               placeholder="Enter custom outfit name..."
@@ -521,7 +485,7 @@ export default function PatchOutfitModal({
             <textarea
               rows={4}
               value={jsonText}
-              onChange={(e) => setJsonText(e.target.value)}
+              onChange={(e) => applyJsonText(e.target.value)}
               placeholder="Optional: Paste outfit JSON here to replace appearance, or leave empty to keep current look and only rename..."
               className="w-full p-3 bg-zinc-900/90 border border-zinc-800 rounded-xl font-mono text-xs text-zinc-200 focus:outline-none focus:border-sky-500 transition resize-y"
             />
@@ -539,7 +503,9 @@ export default function PatchOutfitModal({
             <div className="space-y-2 p-3 bg-zinc-900/40 border border-zinc-800 rounded-xl">
               <label className="text-xs font-semibold text-zinc-300 flex items-center justify-between">
                 <span>Select Outfit from JSON ({candidates.length} found)</span>
-                <span className="text-[11px] text-zinc-500">Pick which look to apply</span>
+                <span className="text-[11px] text-zinc-500">
+                  Pick which look to apply
+                </span>
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1">
                 {candidates.map((cand, idx) => (
@@ -559,7 +525,7 @@ export default function PatchOutfitModal({
                     <div className="relative w-8 h-8 rounded bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0 flex items-center justify-center">
                       {cand.thumbnailUrl ? (
                         <Image
-                          src={cand.thumbnailUrl}
+                          src={hdThumbnailUrl(cand.thumbnailUrl)}
                           alt={cand.name || "Outfit"}
                           fill
                           className="object-contain"
@@ -575,7 +541,8 @@ export default function PatchOutfitModal({
                       </p>
                       <p className="text-[10px] text-zinc-500 font-mono">
                         {cand.playerAvatarType || "R15"} •{" "}
-                        {cand.assets?.length || cand.assetIds?.length || 0} items
+                        {cand.assets?.length || cand.assetIds?.length || 0}{" "}
+                        items
                       </p>
                     </div>
                   </button>
@@ -591,20 +558,33 @@ export default function PatchOutfitModal({
                 <div className="flex items-center gap-2">
                   <span
                     className={`w-2 h-2 rounded-full ${
-                      isJsonProvided ? "bg-emerald-400 animate-pulse" : "bg-sky-400"
+                      isJsonProvided
+                        ? "bg-emerald-400 animate-pulse"
+                        : "bg-sky-400"
                     }`}
                   />
                   <span className="text-xs font-bold text-zinc-200">
-                    {isJsonProvided ? "Parsed Appearance from JSON" : "Current Appearance Preserved"}
+                    {isJsonProvided
+                      ? "Parsed Appearance from JSON"
+                      : "Current Appearance Preserved"}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 font-mono text-zinc-300 font-semibold">
-                    {activeCandidate.playerAvatarType || "R15"}
-                  </span>
-                  <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 font-mono text-zinc-300 font-semibold">
-                    {resolvedAssetsCount} items
-                  </span>
+                  {showAppearanceSkeleton ? (
+                    <>
+                      <PulseSkeleton className="h-5 w-10 rounded-md" />
+                      <PulseSkeleton className="h-5 w-16 rounded-md" />
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 font-mono text-zinc-300 font-semibold">
+                        {activeCandidate.playerAvatarType}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 font-mono text-zinc-300 font-semibold">
+                        {resolvedAssetsCount} items
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -613,8 +593,9 @@ export default function PatchOutfitModal({
                 <div className="p-2.5 bg-sky-950/30 border border-sky-800/40 rounded-lg text-xs text-sky-200 flex items-start gap-2">
                   <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
                   <p className="leading-relaxed">
-                    JSON is empty: equipped items, skin colors, and scales will stay identical to
-                    the current avatar. Only the name will be updated to{" "}
+                    JSON is empty: equipped items, skin colors, and scales will
+                    stay identical to the current avatar. Only the name will be
+                    updated to{" "}
                     <strong className="text-white font-semibold">
                       &ldquo;{customName.trim() || outfit.name}&rdquo;
                     </strong>{" "}
@@ -630,51 +611,71 @@ export default function PatchOutfitModal({
                   <span>Skin Colors (Body Colors)</span>
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                  {[
-                    {
-                      label: "Head",
-                      hex: resolvedColors.bodyColor3s.headColor3,
-                      id: resolvedColors.bodyColors.headColorId,
-                    },
-                    {
-                      label: "Torso",
-                      hex: resolvedColors.bodyColor3s.torsoColor3,
-                      id: resolvedColors.bodyColors.torsoColorId,
-                    },
-                    {
-                      label: "L. Arm",
-                      hex: resolvedColors.bodyColor3s.leftArmColor3,
-                      id: resolvedColors.bodyColors.leftArmColorId,
-                    },
-                    {
-                      label: "R. Arm",
-                      hex: resolvedColors.bodyColor3s.rightArmColor3,
-                      id: resolvedColors.bodyColors.rightArmColorId,
-                    },
-                    {
-                      label: "L. Leg",
-                      hex: resolvedColors.bodyColor3s.leftLegColor3,
-                      id: resolvedColors.bodyColors.leftLegColorId,
-                    },
-                    {
-                      label: "R. Leg",
-                      hex: resolvedColors.bodyColor3s.rightLegColor3,
-                      id: resolvedColors.bodyColors.rightLegColorId,
-                    },
-                  ].map((part) => (
+                  {(showAppearanceSkeleton
+                    ? [
+                        { label: "Head" },
+                        { label: "Torso" },
+                        { label: "L. Arm" },
+                        { label: "R. Arm" },
+                        { label: "L. Leg" },
+                        { label: "R. Leg" },
+                      ]
+                    : [
+                        {
+                          label: "Head",
+                          hex: resolvedColors.bodyColor3s.headColor3,
+                          id: resolvedColors.bodyColors.headColorId,
+                        },
+                        {
+                          label: "Torso",
+                          hex: resolvedColors.bodyColor3s.torsoColor3,
+                          id: resolvedColors.bodyColors.torsoColorId,
+                        },
+                        {
+                          label: "L. Arm",
+                          hex: resolvedColors.bodyColor3s.leftArmColor3,
+                          id: resolvedColors.bodyColors.leftArmColorId,
+                        },
+                        {
+                          label: "R. Arm",
+                          hex: resolvedColors.bodyColor3s.rightArmColor3,
+                          id: resolvedColors.bodyColors.rightArmColorId,
+                        },
+                        {
+                          label: "L. Leg",
+                          hex: resolvedColors.bodyColor3s.leftLegColor3,
+                          id: resolvedColors.bodyColors.leftLegColorId,
+                        },
+                        {
+                          label: "R. Leg",
+                          hex: resolvedColors.bodyColor3s.rightLegColor3,
+                          id: resolvedColors.bodyColors.rightLegColorId,
+                        },
+                      ]
+                  ).map((part) => (
                     <div
                       key={part.label}
                       className="p-2 bg-zinc-950/60 border border-zinc-800/80 rounded-lg flex flex-col items-center gap-1.5 text-center"
                     >
-                      <div
-                        className="w-7 h-7 rounded-md border border-white/10 shadow-sm shrink-0"
-                        style={{ backgroundColor: formatCssHex(part.hex) }}
-                        title={`Color: #${part.hex} (Brick #${part.id})`}
-                      />
-                      <span className="text-[10px] text-zinc-400 font-medium">{part.label}</span>
-                      <span className="text-[10px] font-mono text-zinc-300 uppercase">
-                        #{part.hex.slice(0, 6)}
+                      {showAppearanceSkeleton || !("hex" in part) ? (
+                        <PulseSkeleton className="w-7 h-7 rounded-md" />
+                      ) : (
+                        <div
+                          className="w-7 h-7 rounded-md border border-white/10 shadow-sm shrink-0"
+                          style={{ backgroundColor: formatCssHex(part.hex) }}
+                          title={`Color: #${part.hex} (Brick #${part.id})`}
+                        />
+                      )}
+                      <span className="text-[10px] text-zinc-400 font-medium">
+                        {part.label}
                       </span>
+                      {showAppearanceSkeleton || !("hex" in part) ? (
+                        <PulseSkeleton className="h-2.5 w-10" />
+                      ) : (
+                        <span className="text-[10px] font-mono text-zinc-300 uppercase">
+                          #{part.hex.slice(0, 6)}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -696,11 +697,20 @@ export default function PatchOutfitModal({
                       { l: "Proportion", v: activeCandidate.scale.proportion },
                       { l: "Body Type", v: activeCandidate.scale.bodyType },
                     ].map((s) => (
-                      <div key={s.l} className="bg-zinc-950/40 p-1.5 rounded border border-zinc-800/60">
-                        <span className="text-[10px] text-zinc-500 block">{s.l}</span>
-                        <span className="font-mono text-xs text-zinc-200">
-                          {s.v != null ? `${Math.round(s.v * 100)}%` : "-"}
+                      <div
+                        key={s.l}
+                        className="bg-zinc-950/40 p-1.5 rounded border border-zinc-800/60"
+                      >
+                        <span className="text-[10px] text-zinc-500 block">
+                          {s.l}
                         </span>
+                        {showAppearanceSkeleton ? (
+                          <PulseSkeleton className="h-3 w-8 mx-auto mt-0.5" />
+                        ) : (
+                          <span className="font-mono text-xs text-zinc-200">
+                            {s.v != null ? `${Math.round(s.v * 100)}%` : "-"}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -715,7 +725,9 @@ export default function PatchOutfitModal({
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
               <div>
                 <p className="font-semibold text-red-100">Update Failed</p>
-                <p className="text-red-300/90 leading-relaxed mt-0.5">{submitError}</p>
+                <p className="text-red-300/90 leading-relaxed mt-0.5">
+                  {submitError}
+                </p>
               </div>
             </div>
           )}
@@ -724,8 +736,12 @@ export default function PatchOutfitModal({
             <div className="p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-xl flex items-start gap-2.5 text-xs text-emerald-200">
               <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <div>
-                <p className="font-semibold text-emerald-100">Update Successful</p>
-                <p className="text-emerald-300/90 leading-relaxed mt-0.5">{submitSuccess}</p>
+                <p className="font-semibold text-emerald-100">
+                  Update Successful
+                </p>
+                <p className="text-emerald-300/90 leading-relaxed mt-0.5">
+                  {submitSuccess}
+                </p>
               </div>
             </div>
           )}
@@ -754,9 +770,10 @@ export default function PatchOutfitModal({
               </>
             ) : (
               <>
-                <Sparkles className="w-4 h-4" />
                 <span>
-                  {isJsonProvided ? "Update Avatar from JSON" : "Save Name to Roblox"}
+                  {isJsonProvided
+                    ? "Update Avatar from JSON"
+                    : "Save Name to Roblox"}
                 </span>
               </>
             )}

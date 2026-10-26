@@ -1,10 +1,10 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/error-message";
 import { extractOutfitColors } from "@/lib/roblox-colors";
 import { ArrangedOutfit, ExecutionLogEntry, ExecutionState, RobloxUser } from "@/types/roblox";
 import {
   ExternalLink,
-  Play,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -110,8 +110,8 @@ export default function ExecutionModal({
         csrfToken = csrfJson.csrfToken;
         addLog("info", "Retrieved fresh CSRF token.");
       }
-    } catch (err: any) {
-      addLog("warning", "CSRF token fallback: " + err.message);
+    } catch (err) {
+      addLog("warning", "CSRF token fallback: " + getErrorMessage(err, "unknown error"));
     }
 
     addLog("info", "Checking existing outfits on your Roblox account...");
@@ -124,10 +124,10 @@ export default function ExecutionModal({
       });
       if (liveRes.ok) {
         const liveJson = await liveRes.json();
-        liveRobloxOutfits = liveJson.outfits || [];
+        liveRobloxOutfits = (liveJson as { outfits?: ArrangedOutfit[] }).outfits || [];
       }
-    } catch (err: any) {
-      addLog("warning", "Roblox outfits query fallback: " + err.message);
+    } catch (err) {
+      addLog("warning", "Roblox outfits query fallback: " + getErrorMessage(err, "unknown error"));
     }
 
     const excludedIds = new Set(outfits.filter((o) => o.isExcluded).map((o) => o.id));
@@ -203,9 +203,9 @@ export default function ExecutionModal({
             if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
             deleteSuccess = true;
             addLog("success", `[Delete ${i + 1}/${totalDeletes}] Deleted.`);
-          } catch (err: any) {
+          } catch (err) {
             if (deleteAttempts >= 3) {
-              addLog("warning", `[Delete ${i + 1}/${totalDeletes}] Note: ${err.message}`);
+              addLog("warning", `[Delete ${i + 1}/${totalDeletes}] Note: ${getErrorMessage(err, "delete failed")}`);
               break;
             }
             await new Promise((r) => setTimeout(r, 2000));
@@ -254,7 +254,6 @@ export default function ExecutionModal({
 
       let createSuccess = false;
       let createAttempts = 0;
-      let lastCreateError = "";
 
       while (!createSuccess && createAttempts < 3) {
         createAttempts++;
@@ -262,7 +261,7 @@ export default function ExecutionModal({
           const details = outfit.details;
           const assetIds = details?.assets && details.assets.length > 0
             ? details.assets.map((a) => a.id)
-            : (details as any)?.assetIds || [];
+            : [];
 
           const colors = extractOutfitColors(details || outfit);
           const res = await fetch("/api/roblox/create-outfit", {
@@ -313,11 +312,11 @@ export default function ExecutionModal({
             addLog("success", `[Recreate ${j + 1}/${totalCount}] Created (Rank #${targetRank}).`);
           }
           successfulCreations++;
-        } catch (err: any) {
-          lastCreateError = err.message;
+        } catch (err) {
+          const message = getErrorMessage(err, "Failed to create outfit.");
           if (createAttempts >= 3) {
-            addLog("error", `[Recreate ${j + 1}/${totalCount}] Failed after 3 attempts: ${err.message}`);
-            failedList.push({ outfit, error: err.message });
+            addLog("error", `[Recreate ${j + 1}/${totalCount}] Failed after 3 attempts: ${message}`);
+            failedList.push({ outfit, error: message });
             break;
           }
           await new Promise((r) => setTimeout(r, 2000));

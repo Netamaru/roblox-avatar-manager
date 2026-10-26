@@ -1,6 +1,8 @@
 "use client";
 
+import PulseSkeleton from "@/components/PulseSkeleton";
 import { formatCssHex } from "@/lib/roblox-colors";
+import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
 import { ArrangedOutfit } from "@/types/roblox";
 import {
   AlertTriangle,
@@ -10,7 +12,6 @@ import {
   Download,
   ExternalLink,
   FileCode,
-  FileJson,
   Layers,
   Palette,
   Sliders,
@@ -26,6 +27,7 @@ interface OutfitDetailModalProps {
   outfit: ArrangedOutfit | null;
   onClose: () => void;
   onPatch?: (outfit: ArrangedOutfit) => void;
+  isFetchingDetails?: boolean;
 }
 
 // Common Roblox BrickColor preview palette
@@ -171,6 +173,7 @@ export default function OutfitDetailModal({
   outfit,
   onClose,
   onPatch,
+  isFetchingDetails = false,
 }: OutfitDetailModalProps) {
   const [activeTab, setActiveTab] = useState<"items" | "body" | "json">("items");
   const [copiedId, setCopiedId] = useState(false);
@@ -185,15 +188,12 @@ export default function OutfitDetailModal({
     () => (jsonString ? jsonString.split("\n") : []),
     [jsonString]
   );
-  const jsonSizeKB = useMemo(
-    () => (jsonString ? (new Blob([jsonString]).size / 1024).toFixed(1) : "0"),
-    [jsonString]
-  );
 
   if (!outfit) return null;
 
   const details = outfit.details;
-  const rigType = details?.playerAvatarType || "R15";
+  const isDetailsPending = isFetchingDetails && !details;
+  const rigType = details?.playerAvatarType;
   const bodyColors = details?.bodyColors;
   const scale = details?.scale;
   const assets = details?.assets || [];
@@ -298,7 +298,7 @@ export default function OutfitDetailModal({
 
                 {outfit.thumbnailUrl ? (
                   <Image
-                    src={outfit.thumbnailUrl}
+                    src={hdThumbnailUrl(outfit.thumbnailUrl)}
                     alt={outfit.name}
                     fill
                     className="object-contain p-3 drop-shadow-[0_15px_25px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-105"
@@ -315,7 +315,11 @@ export default function OutfitDetailModal({
 
                 {/* Rig Badge Pinned Top-Right */}
                 <div className="absolute top-3 right-3 px-2.5 py-1 rounded-md bg-zinc-900/90 border border-zinc-700/80 text-zinc-200 text-xs font-mono font-semibold backdrop-blur-sm shadow-md">
-                  {rigType}
+                  {isDetailsPending ? (
+                    <PulseSkeleton className="h-3 w-8 align-middle" />
+                  ) : (
+                    rigType
+                  )}
                 </div>
               </div>
 
@@ -361,11 +365,21 @@ export default function OutfitDetailModal({
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-800/80">
               <div className="p-3 rounded-lg bg-zinc-900/70 border border-zinc-800">
                 <span className="text-xs text-zinc-400 block font-medium">Equipped Items</span>
-                <span className="text-base font-bold text-white">{assets.length} items</span>
+                {isDetailsPending ? (
+                  <PulseSkeleton className="h-5 w-16 mt-1" />
+                ) : (
+                  <span className="text-base font-bold text-white">{assets.length} items</span>
+                )}
               </div>
               <div className="p-3 rounded-lg bg-zinc-900/70 border border-zinc-800">
                 <span className="text-xs text-zinc-400 block font-medium">Avatar Model</span>
-                <span className="text-base font-bold text-white">{rigType} Rig</span>
+                {isDetailsPending ? (
+                  <PulseSkeleton className="h-5 w-14 mt-1" />
+                ) : (
+                  <span className="text-base font-bold text-white">
+                    {rigType ? `${rigType} Rig` : "—"}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -398,14 +412,18 @@ export default function OutfitDetailModal({
               >
                 <Layers className="w-4 h-4" />
                 <span>Equipped Assets</span>
-                <span
-                  className={`px-2 py-0.5 text-xs rounded-full font-mono ${activeTab === "items"
-                    ? "bg-sky-950 text-sky-400 border border-sky-800/60"
-                    : "bg-zinc-900 text-zinc-400 border border-zinc-800"
-                    }`}
-                >
-                  {assets.length}
-                </span>
+                {isDetailsPending ? (
+                  <PulseSkeleton className="h-5 w-7 rounded-full" />
+                ) : (
+                  <span
+                    className={`px-2 py-0.5 text-xs rounded-full font-mono ${activeTab === "items"
+                      ? "bg-sky-950 text-sky-400 border border-sky-800/60"
+                      : "bg-zinc-900 text-zinc-400 border border-zinc-800"
+                      }`}
+                  >
+                    {assets.length}
+                  </span>
+                )}
               </button>
 
               <button
@@ -440,6 +458,20 @@ export default function OutfitDetailModal({
             >
               {activeTab === "items" ? (
                 <div className="space-y-3">
+                  {isDetailsPending ? (
+                    <div className="space-y-2.5">
+                      {Array.from({ length: 4 }, (_, index) => (
+                        <div
+                          key={index}
+                          className="p-3.5 rounded-xl border border-zinc-800 bg-zinc-900/50 space-y-2"
+                        >
+                          <PulseSkeleton className="h-4 w-40" />
+                          <PulseSkeleton className="h-3 w-24" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <>
                   {missingAssetsCount > 0 && (
                     <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-700/60 text-amber-200 space-y-1.5">
                       <div className="flex items-center gap-2 font-semibold text-sm text-amber-300">
@@ -520,9 +552,47 @@ export default function OutfitDetailModal({
                       </p>
                     </div>
                   )}
+                    </>
+                  )}
                 </div>
               ) : activeTab === "body" ? (
                 <div className="space-y-6">
+                  {isDetailsPending ? (
+                    <>
+                      <div className="space-y-3">
+                        <PulseSkeleton className="h-4 w-40" />
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                          {Array.from({ length: 6 }, (_, index) => (
+                            <div
+                              key={index}
+                              className="p-3 bg-zinc-900/60 border border-zinc-800 rounded-xl space-y-2"
+                            >
+                              <PulseSkeleton className="h-3 w-14" />
+                              <PulseSkeleton className="h-5 w-12" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        <PulseSkeleton className="h-4 w-28" />
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                          {Array.from({ length: 6 }, (_, index) => (
+                            <div
+                              key={index}
+                              className="p-3 bg-zinc-900/60 border border-zinc-800 rounded-xl flex items-center gap-3"
+                            >
+                              <PulseSkeleton className="w-8 h-8 rounded-lg" />
+                              <div className="space-y-1.5">
+                                <PulseSkeleton className="h-3 w-12" />
+                                <PulseSkeleton className="h-3 w-16" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
                   {/* Proportions & Scaling */}
                   {scale ? (
                     <div className="space-y-3">
@@ -582,6 +652,8 @@ export default function OutfitDetailModal({
                       </div>
                     </div>
                   ) : null}
+                    </>
+                  )}
                 </div>
               ) : (
                 /* Raw JSON Tab */

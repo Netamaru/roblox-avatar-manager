@@ -2,12 +2,11 @@
 
 import { ArrangedOutfit, DryRunPlanItem, RobloxUser } from "@/types/roblox";
 import {
-  AlertCircle,
   Play,
   RotateCcw,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface DryRunModalProps {
   isOpen: boolean;
@@ -26,7 +25,6 @@ export default function DryRunModal({
   user,
   cookie,
   onProceedToExecute,
-  onDownloadBackup,
 }: DryRunModalProps) {
   const [isTesting, setIsTesting] = useState(false);
   const [authStatus, setAuthStatus] = useState<"pending" | "success" | "error">("pending");
@@ -37,13 +35,7 @@ export default function DryRunModal({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [outfitsToDelete, setOutfitsToDelete] = useState<ArrangedOutfit[]>([]);
 
-  useEffect(() => {
-    if (isOpen) {
-      runDiagnostics();
-    }
-  }, [isOpen, outfits]);
-
-  const runDiagnostics = async () => {
+  const runDiagnostics = useCallback(async () => {
     setIsTesting(true);
     setAuthStatus("pending");
     setCsrfStatus("pending");
@@ -86,7 +78,7 @@ export default function DryRunModal({
       });
       if (outfitsRes.ok) {
         const outfitsJson = await outfitsRes.json();
-        liveRobloxOutfits = outfitsJson.outfits || [];
+        liveRobloxOutfits = (outfitsJson as { outfits?: ArrangedOutfit[] }).outfits || [];
       }
     } catch {
       // ignore
@@ -161,7 +153,15 @@ export default function DryRunModal({
     setPlanItems(plan);
     setWarnings(warnList);
     setIsTesting(false);
-  };
+  }, [cookie, outfits, user]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = window.setTimeout(() => {
+      void runDiagnostics();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [isOpen, runDiagnostics]);
 
   if (!isOpen) return null;
 
