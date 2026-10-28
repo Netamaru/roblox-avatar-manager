@@ -17,7 +17,14 @@ interface RobloxOutfitListItem {
 
 interface ThumbnailItem {
   targetId?: number;
+  state?: string;
   imageUrl?: string;
+}
+
+interface DevelopAssetItem {
+  id?: number;
+  isModerated?: boolean;
+  moderationStatus?: string;
 }
 
 interface OutfitDetailsResponse {
@@ -216,8 +223,140 @@ export async function getAssetThumbnails(assetIds: number[]) {
   return thumbnailMap;
 }
 
-// In-memory cache for asset ownership checks to avoid repeat calls
-const ownershipCache = new Map<string, boolean>();
+// In-memory cache with TTL for asset ownership & moderation checks to avoid repeat calls within a batch
+// while still detecting newly deleted/moderated assets upon reload.
+const ASSET_CHECK_CACHE_TTL_MS = 60_000;
+
+interface CacheEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
+const ownershipCache = new Map<string, CacheEntry<boolean>>();
+const ownershipInFlight = new Map<string, Promise<boolean>>();
+const moderationCache = new Map<number, CacheEntry<boolean>>();
+
+function getCachedValue<K, V>(cache: Map<K, CacheEntry<V>>, key: K): V | undefined {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiresAt) {
+    cache.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+function setCachedValue<K, V>(cache: Map<K, CacheEntry<V>>, key: K, value: V): void {
+  cache.set(key, { value, expiresAt: Date.now() + ASSET_CHECK_CACHE_TTL_MS });
+}
+
+function isDevelopAssetModerated(item: DevelopAssetItem | undefined): boolean {
+  if (!item) return true;
+  if (item.isModerated === true) return true;
+  if (
+    typeof item.moderationStatus === "string" &&
+    item.moderationStatus !== "Green" &&
+    item.moderationStatus !== "Approved"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Checks whether assets have been moderated or deleted by Roblox.
+ * Even when Roblox deletes an item, the user may still own the inventory record (`is-owned === true`)
+ * until a refund is processed, so we must also check asset moderation status via `develop.roblox.com`
+ * (with fallback to `thumbnails.roblox.com` blocked state).
+ */
+export async function checkAssetsModeration(
+  cookie: string,
+  assetIds: number[]
+): Promise<Map<number, boolean>> {
+  const result = new Map<number, boolean>();
+  const uncachedIds: number[] = [];
+
+  for (const id of assetIds) {
+    const cached = getCachedValue(moderationCache, id);
+    if (cached !== undefined) {
+      result.set(id, cached);
+    } else if (!uncachedIds.includes(id)) {
+      uncachedIds.push(id);
+    }
+  }
+
+  if (uncachedIds.length === 0) {
+    return result;
+  }
+
+  const sanitized = cleanCookie(cookie);
+  const batchSize = 50;
+
+  for (let i = 0; i < uncachedIds.length; i += batchSize) {
+    const batch = uncachedIds.slice(i, i + batchSize);
+    let handledByDevelop = false;
+
+    try {
+      const res = await fetch(
+        `https://develop.roblox.com/v1/assets?assetIds=${batch.join(",")}`,
+        {
+          headers: {
+            Cookie: `.ROBLOSECURITY=${sanitized}`,
+            "User-Agent": ROBLOX_USER_AGENT,
+          },
+          cache: "no-store",
+        }
+      );
+
+      if (res.ok) {
+        const json = (await res.json()) as { data?: DevelopAssetItem[] };
+        if (Array.isArray(json.data)) {
+          handledByDevelop = true;
+          const byId = new Map<number, DevelopAssetItem>();
+          for (const item of json.data) {
+            if (typeof item.id === "number") {
+              byId.set(item.id, item);
+            }
+          }
+          for (const id of batch) {
+            const moderated = isDevelopAssetModerated(byId.get(id));
+            setCachedValue(moderationCache, id, moderated);
+            result.set(id, moderated);
+          }
+        }
+      }
+    } catch {
+      // Fallback to thumbnail state check below
+    }
+
+    if (!handledByDevelop) {
+      try {
+        const thumbRes = await fetch(assetThumbnailsApiUrl(batch), { cache: "no-store" });
+        if (thumbRes.ok) {
+          const thumbJson = (await thumbRes.json()) as { data?: ThumbnailItem[] };
+          const byId = new Map<number, ThumbnailItem>();
+          for (const item of thumbJson.data || []) {
+            if (typeof item.targetId === "number") {
+              byId.set(item.targetId, item);
+            }
+          }
+          for (const id of batch) {
+            const thumb = byId.get(id);
+            const blocked =
+              thumb?.state === "Blocked" ||
+              Boolean(thumb?.imageUrl?.includes("/UnapprovedImage/"));
+            setCachedValue(moderationCache, id, blocked);
+            result.set(id, blocked);
+          }
+        }
+      } catch {
+        // Ignore fallback failure
+      }
+    }
+  }
+
+  return result;
+}
 
 export async function checkAssetOwnership(
   cookie: string,
@@ -225,31 +364,44 @@ export async function checkAssetOwnership(
   assetId: number
 ): Promise<boolean> {
   const cacheKey = `${userId}:${assetId}`;
-  if (ownershipCache.has(cacheKey)) {
-    return ownershipCache.get(cacheKey)!;
+  const cached = getCachedValue(ownershipCache, cacheKey);
+  if (cached !== undefined) {
+    return cached;
   }
 
-  try {
-    const res = await fetch(
-      `https://inventory.roblox.com/v1/users/${userId}/items/0/${assetId}/is-owned`,
-      {
-        headers: {
-          Cookie: `.ROBLOSECURITY=${cleanCookie(cookie)}`,
-          "User-Agent": ROBLOX_USER_AGENT,
-        },
-        cache: "no-store",
-      }
-    );
-    if (!res.ok) {
-      return true;
-    }
-    const text = (await res.text()).trim();
-    const isOwned = text === "true";
-    ownershipCache.set(cacheKey, isOwned);
-    return isOwned;
-  } catch {
-    return true;
+  const existingPromise = ownershipInFlight.get(cacheKey);
+  if (existingPromise) {
+    return existingPromise;
   }
+
+  const requestPromise = (async () => {
+    try {
+      const res = await fetch(
+        `https://inventory.roblox.com/v1/users/${userId}/items/0/${assetId}/is-owned`,
+        {
+          headers: {
+            Cookie: `.ROBLOSECURITY=${cleanCookie(cookie)}`,
+            "User-Agent": ROBLOX_USER_AGENT,
+          },
+          cache: "no-store",
+        }
+      );
+      if (!res.ok) {
+        return true;
+      }
+      const text = (await res.text()).trim();
+      const isOwned = text === "true";
+      setCachedValue(ownershipCache, cacheKey, isOwned);
+      return isOwned;
+    } catch {
+      return true;
+    } finally {
+      ownershipInFlight.delete(cacheKey);
+    }
+  })();
+
+  ownershipInFlight.set(cacheKey, requestPromise);
+  return requestPromise;
 }
 
 /**
@@ -324,15 +476,31 @@ export async function getOutfitDetails(
     }
   }
 
-  // Check ownership of assets in parallel with cache
+  // Check moderation status & ownership of assets in parallel with cache
   const missingAssetIds: number[] = [];
-  if (currentUserId && assets.length > 0) {
+  if (assets.length > 0) {
+    const moderatedMap = await checkAssetsModeration(
+      sanitized,
+      assets.map((a) => a.id)
+    );
+
     await Promise.all(
       assets.map(async (asset) => {
-        const isOwned = await checkAssetOwnership(sanitized, currentUserId!, asset.id);
-        asset.isOwned = isOwned;
-        if (!isOwned) {
+        const isModerated = moderatedMap.get(asset.id) === true;
+        if (isModerated) {
+          asset.isOwned = false;
           missingAssetIds.push(asset.id);
+          return;
+        }
+
+        if (currentUserId) {
+          const isOwned = await checkAssetOwnership(sanitized, currentUserId, asset.id);
+          asset.isOwned = isOwned;
+          if (!isOwned) {
+            missingAssetIds.push(asset.id);
+          }
+        } else {
+          asset.isOwned = true;
         }
       })
     );
@@ -521,13 +689,24 @@ export async function patchOutfit(
   const sanitized = cleanCookie(cookie);
   let token = csrfToken || (await getCsrfToken(sanitized));
 
-  let currentAssets =
-    payload.assets && payload.assets.length > 0
-      ? toPatchAssets(payload.assets)
-      : (payload.assetIds || []).map((id) => ({ id }));
+  const removedAssets: number[] = [];
+  let currentAssets: Array<{ id: number; meta?: RobloxAsset["meta"] }>;
+
+  if (payload.assets && payload.assets.length > 0) {
+    const validAssets: RobloxAsset[] = [];
+    for (const asset of payload.assets) {
+      if (asset.isOwned === false) {
+        removedAssets.push(asset.id);
+      } else {
+        validAssets.push(asset);
+      }
+    }
+    currentAssets = toPatchAssets(validAssets);
+  } else {
+    currentAssets = (payload.assetIds || []).map((id) => ({ id }));
+  }
 
   let patchRes: Response | null = null;
-  const removedAssets: number[] = [];
   let currentOutfitName = payload.name?.trim() || "Avatar";
   let wasNameReset = false;
   let maxRetries = 10;
