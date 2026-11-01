@@ -582,7 +582,7 @@ export default function HomePage() {
             : "flex items-center justify-center py-12"
         }`}
       >
-        {showWorkspace ? (
+        {showWorkspace && user ? (
           /* CONNECTED WORKSPACE */
           <div className="space-y-5">
             {/* Account & Stats Bar */}
