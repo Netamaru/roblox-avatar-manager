@@ -12,8 +12,6 @@ interface DeleteOutfitModalProps {
   onClose: () => void;
   outfit: ArrangedOutfit | null;
   cookie: string;
-  hasBackupThisSession: boolean;
-  onDownloadBackupIfNeeded: () => boolean;
   onDeleted: (outfitId: number) => void;
 }
 
@@ -22,8 +20,6 @@ export default function DeleteOutfitModal({
   onClose,
   outfit,
   cookie,
-  hasBackupThisSession,
-  onDownloadBackupIfNeeded,
   onDeleted,
 }: DeleteOutfitModalProps) {
   const [isDeleting, setIsDeleting] = useState(false);
@@ -42,8 +38,6 @@ export default function DeleteOutfitModal({
     setErrorMessage(null);
 
     try {
-      onDownloadBackupIfNeeded();
-
       const res = await fetch("/api/roblox/delete-outfit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -92,25 +86,31 @@ export default function DeleteOutfitModal({
             <p className="text-zinc-200 leading-relaxed">
               This permanently deletes{" "}
               <strong className="text-white">{outfit.name}</strong> from your
-              Roblox account.
-              {hasBackupThisSession
-                ? " A JSON backup was already saved this session."
-                : " A JSON backup of your current list will download first."}
+              Roblox account. This action cannot be undone.
             </p>
           </div>
 
           <div className="flex items-center gap-3 p-3 rounded-xl border border-zinc-800 bg-zinc-900/60">
             <div className="relative w-14 h-14 rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0">
+              {(outfit.backgroundUrl || outfit.details?.background?.imageUrl) && (
+                <Image
+                  src={hdThumbnailUrl(outfit.backgroundUrl || outfit.details!.background!.imageUrl!)}
+                  alt="Background"
+                  fill
+                  className="object-cover"
+                  unoptimized
+                />
+              )}
               {outfit.thumbnailUrl ? (
                 <Image
                   src={hdThumbnailUrl(outfit.thumbnailUrl)}
                   alt={outfit.name}
                   fill
-                  className="object-contain p-1"
+                  className="object-contain p-1 relative z-[1]"
                   unoptimized
                 />
               ) : (
-                <div className="w-full h-full bg-zinc-800" />
+                <div className="w-full h-full bg-zinc-800 relative z-[1]" />
               )}
             </div>
             <div className="min-w-0">
@@ -150,7 +150,7 @@ export default function DeleteOutfitModal({
                   <span>Deleting...</span>
                 </>
               ) : (
-                <span>Backup &amp; Delete</span>
+                <span>Delete</span>
               )}
             </button>
           </div>

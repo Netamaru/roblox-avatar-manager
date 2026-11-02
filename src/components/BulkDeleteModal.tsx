@@ -251,24 +251,36 @@ export default function BulkDeleteModal({
                 <span className="text-zinc-300 font-semibold text-xs block">
                   Outfits to be deleted ({totalCount}):
                 </span>
-                <div className="max-h-40 overflow-y-auto divide-y divide-zinc-850 rounded-xl border border-zinc-800 bg-zinc-900/50 p-1.5">
+                <div className="max-h-48 overflow-y-auto rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-1.5 space-y-1 custom-scrollbar">
                   {targetOutfits.map((o) => (
-                    <div key={o.id} className="p-2 flex items-center gap-3">
-                      <div className="relative w-8 h-8 rounded-lg bg-zinc-800 shrink-0 overflow-hidden">
+                    <div
+                      key={o.id}
+                      className="p-2 flex items-center gap-3 rounded-lg hover:bg-zinc-900/60 transition-colors"
+                    >
+                      <div className="relative w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800/80 shrink-0 overflow-hidden">
+                        {(o.backgroundUrl || o.details?.background?.imageUrl) && (
+                          <Image
+                            src={hdThumbnailUrl(o.backgroundUrl || o.details!.background!.imageUrl!)}
+                            alt="Background"
+                            fill
+                            className="object-cover"
+                            unoptimized
+                          />
+                        )}
                         {o.thumbnailUrl ? (
                           <Image
                             src={hdThumbnailUrl(o.thumbnailUrl)}
                             alt={o.name}
                             fill
-                            className="object-contain p-0.5"
+                            className="object-contain p-0.5 relative z-[1]"
                             unoptimized
                           />
                         ) : (
-                          <div className="w-full h-full bg-zinc-800" />
+                          <div className="w-full h-full bg-zinc-800 relative z-[1]" />
                         )}
                       </div>
                       <span className="text-zinc-100 truncate font-medium text-sm">{o.name}</span>
-                      <span className="text-xs text-zinc-500 font-mono ml-auto">#{o.id}</span>
+                      <span className="text-xs text-zinc-500 font-mono ml-auto shrink-0">#{o.id}</span>
                     </div>
                   ))}
                 </div>
@@ -333,7 +345,7 @@ export default function BulkDeleteModal({
               {/* Logs */}
               <div
                 ref={logsContainerRef}
-                className="p-4 bg-zinc-900/90 border border-zinc-800 rounded-xl font-mono text-xs max-h-52 overflow-y-auto space-y-1.5"
+                className="p-4 bg-zinc-900/90 border border-zinc-800 rounded-xl font-mono text-xs max-h-52 overflow-y-auto space-y-1.5 custom-scrollbar"
               >
                 {logs.map((log) => (
                   <div key={log.id} className="flex gap-2">
@@ -343,10 +355,10 @@ export default function BulkDeleteModal({
                         log.type === "success"
                           ? "text-emerald-400 font-medium"
                           : log.type === "error"
-                          ? "text-red-400 font-semibold"
-                          : log.type === "warning"
-                          ? "text-amber-400"
-                          : "text-zinc-300"
+                            ? "text-red-400 font-semibold"
+                            : log.type === "warning"
+                              ? "text-amber-400"
+                              : "text-zinc-300"
                       }
                     >
                       {log.message}

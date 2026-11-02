@@ -1,5 +1,6 @@
 import { extractOutfitColors } from "@/lib/roblox-colors";
 import { getErrorMessage } from "@/lib/error-message";
+import { isAvatarBackgroundAsset } from "@/lib/roblox-server";
 import {
   ArrangedOutfit,
   ExportManifest,
@@ -24,6 +25,22 @@ export function buildOutfitExportEntry(
 ): ExportManifest["outfits"][number] {
   const colors = extractOutfitColors(outfit.details || outfit);
   const assets = outfit.details?.assets || [];
+  const bgAsset = assets.find(isAvatarBackgroundAsset);
+  const background =
+    outfit.details?.background ||
+    (bgAsset
+      ? {
+          id: bgAsset.id,
+          name: bgAsset.name,
+          imageUrl: outfit.backgroundUrl,
+        }
+      : outfit.backgroundAssetId || outfit.backgroundUrl
+        ? {
+            id: outfit.backgroundAssetId || 0,
+            imageUrl: outfit.backgroundUrl,
+          }
+        : undefined);
+
   return {
     id: outfit.id,
     name: outfit.name,
@@ -34,6 +51,8 @@ export function buildOutfitExportEntry(
     assetIds: assets.map((a) => a.id),
     assets,
     thumbnailUrl: outfit.thumbnailUrl,
+    background: background?.id ? background : undefined,
+    backgroundAssetId: background?.id || outfit.backgroundAssetId,
     orderIndex,
   };
 }
@@ -88,6 +107,13 @@ export interface ParsedOutfitCandidate {
   id?: number;
   name?: string;
   thumbnailUrl?: string;
+  backgroundUrl?: string;
+  background?: {
+    id: number;
+    name?: string;
+    imageUrl?: string;
+  };
+  backgroundAssetId?: number;
   playerAvatarType?: string;
   bodyColors?: Partial<RobloxBodyColors>;
   bodyColor3s?: Record<string, string>;
@@ -179,6 +205,60 @@ export function parseOutfitCandidates(raw: string): {
         ? details.assetIds.filter((id): id is number => typeof id === "number")
         : assets.map((asset) => asset.id);
 
+      // Extract background if present
+      let background: { id: number; name?: string; imageUrl?: string } | undefined;
+      let backgroundAssetId: number | undefined;
+
+      const rawBg = rec.background || details.background;
+      if (isRecord(rawBg)) {
+        const bgId = typeof rawBg.id === "number" ? rawBg.id : undefined;
+        if (bgId) {
+          background = {
+            id: bgId,
+            name: typeof rawBg.name === "string" ? rawBg.name : undefined,
+            imageUrl: typeof rawBg.imageUrl === "string" ? rawBg.imageUrl : undefined,
+          };
+          backgroundAssetId = bgId;
+        }
+      } else if (typeof rec.backgroundAssetId === "number") {
+        backgroundAssetId = rec.backgroundAssetId;
+        background = { id: rec.backgroundAssetId };
+      } else if (typeof details.backgroundAssetId === "number") {
+        backgroundAssetId = details.backgroundAssetId as number;
+        background = { id: details.backgroundAssetId as number };
+      }
+
+      // Check if assets already contains background asset, or if one in assets matches AvatarBackground
+      const bgFromAssets = assets.find(isAvatarBackgroundAsset);
+      if (bgFromAssets) {
+        backgroundAssetId = bgFromAssets.id;
+        if (!background) {
+          background = {
+            id: bgFromAssets.id,
+            name: bgFromAssets.name,
+          };
+        }
+      } else if (backgroundAssetId && !assets.some((a) => a.id === backgroundAssetId)) {
+        // If backgroundAssetId was specified explicitly in JSON, ensure it is added to assets
+        assets.push({
+          id: backgroundAssetId,
+          name: background?.name || `Background ${backgroundAssetId}`,
+          assetType: { id: 92, name: "AvatarBackground" },
+        });
+        if (!assetIds.includes(backgroundAssetId)) {
+          assetIds.push(backgroundAssetId);
+        }
+      }
+
+      const backgroundUrl =
+        background?.imageUrl ||
+        (typeof rec.backgroundUrl === "string" ? rec.backgroundUrl : undefined) ||
+        (typeof details.backgroundUrl === "string" ? details.backgroundUrl : undefined);
+
+      if (background && backgroundUrl && !background.imageUrl) {
+        background.imageUrl = backgroundUrl;
+      }
+
       return {
         id:
           (typeof rec.id === "number" ? rec.id : undefined) ??
@@ -190,6 +270,9 @@ export function parseOutfitCandidates(raw: string): {
         thumbnailUrl:
           (typeof rec.thumbnailUrl === "string" ? rec.thumbnailUrl : undefined) ||
           (typeof details.thumbnailUrl === "string" ? details.thumbnailUrl : undefined),
+        backgroundUrl,
+        background,
+        backgroundAssetId,
         playerAvatarType:
           (typeof details.playerAvatarType === "string"
             ? details.playerAvatarType
@@ -226,10 +309,17 @@ export function importOutfitsFromJson(raw: string): ArrangedOutfit[] {
         assetType: { id: 0, name: "Asset" },
       }));
 
+    const background =
+      item.background ||
+      (item.backgroundAssetId ? { id: item.backgroundAssetId } : undefined);
+    const backgroundUrl = item.backgroundUrl || item.background?.imageUrl;
+
     return {
       id: item.id || Math.floor(10000000 + Math.random() * 90000000),
       name: item.name || `Outfit #${idx + 1}`,
       thumbnailUrl: item.thumbnailUrl,
+      backgroundUrl,
+      backgroundAssetId: item.backgroundAssetId || background?.id,
       originalIndex: idx,
       currentIndex: idx,
       isLoaded: true,
@@ -248,6 +338,7 @@ export function importOutfitsFromJson(raw: string): ArrangedOutfit[] {
           bodyType: 0,
         },
         assets,
+        background,
       },
     };
   });

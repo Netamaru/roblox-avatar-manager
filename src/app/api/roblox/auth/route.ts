@@ -1,18 +1,38 @@
 import { getErrorMessage } from "@/lib/error-message";
-import { getAuthenticatedUser } from "@/lib/roblox-server";
+import { cleanCookie, getAuthenticatedUser, hasConfiguredCookie } from "@/lib/roblox-server";
 import { NextRequest, NextResponse } from "next/server";
+
+export async function GET() {
+  try {
+    const cookie = cleanCookie();
+    if (!cookie) {
+      return NextResponse.json({ authenticated: false, hasEnvCookie: false });
+    }
+    const user = await getAuthenticatedUser(cookie);
+    return NextResponse.json({ authenticated: true, hasEnvCookie: true, user });
+  } catch (err) {
+    return NextResponse.json({
+      authenticated: false,
+      hasEnvCookie: hasConfiguredCookie(),
+      error: getErrorMessage(err, "Failed to verify Roblox account from .env"),
+    });
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const cookie = body.cookie;
+    const body = await req.json().catch(() => ({}));
+    const cookie = cleanCookie(body?.cookie);
 
-    if (!cookie || typeof cookie !== "string") {
-      return NextResponse.json({ error: ".ROBLOSECURITY cookie is required." }, { status: 400 });
+    if (!cookie) {
+      return NextResponse.json(
+        { error: ".ROBLOSECURITY cookie is required (or configure cookie in .env)." },
+        { status: 400 }
+      );
     }
 
     const user = await getAuthenticatedUser(cookie);
-    return NextResponse.json({ success: true, user });
+    return NextResponse.json({ success: true, user, isFromEnv: !body?.cookie });
   } catch (err) {
     return NextResponse.json(
       { error: getErrorMessage(err, "Failed to verify Roblox account.") },
@@ -20,3 +40,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+

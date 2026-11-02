@@ -13,13 +13,12 @@ import WorkspaceSkeleton from "@/components/WorkspaceSkeleton";
 import OutfitDetailModal from "@/components/OutfitDetailModal";
 import PatchOutfitModal from "@/components/PatchOutfitModal";
 import { extractOutfitColors } from "@/lib/roblox-colors";
-import { downloadOutfitExportJson } from "@/lib/outfit-json";
+import { buildOutfitExportEntry, downloadOutfitExportJson } from "@/lib/outfit-json";
 import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
 import { getErrorMessage } from "@/lib/error-message";
 import { ArrangedOutfit, RobloxUser } from "@/types/roblox";
 import {
   AlertTriangle,
-  ArrowUpDown,
   EyeOff,
   KeyRound,
   LayoutGrid,
@@ -99,29 +98,37 @@ export default function HomePage() {
     setDetailsPendingCount(missing.length);
 
     try {
-      const batchRes = await fetch("/api/roblox/outfit-details", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cookie: activeCookie,
-          userId,
-          outfitIds: missing.map((m) => m.id),
-        }),
-      });
-
-      if (batchRes.ok) {
-        const json = await batchRes.json();
-        const detailsMap = json.details || {};
-        setOutfits((prev) =>
-          prev.map((item) => {
-            const detail = detailsMap[item.id] || item.details;
-            return {
-              ...item,
-              details: detail,
-              hasMissingItems: (detail?.missingAssetIds?.length ?? 0) > 0,
-            };
+      const BATCH_SIZE = 20;
+      for (let i = 0; i < missing.length; i += BATCH_SIZE) {
+        const batch = missing.slice(i, i + BATCH_SIZE);
+        const batchRes = await fetch("/api/roblox/outfit-details", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cookie: activeCookie,
+            userId,
+            outfitIds: batch.map((m) => m.id),
           }),
-        );
+        });
+
+        if (batchRes.ok) {
+          const json = await batchRes.json();
+          const detailsMap = json.details || {};
+          setOutfits((prev) =>
+            prev.map((item) => {
+              const detail = detailsMap[item.id];
+              if (!detail) return item;
+              return {
+                ...item,
+                details: detail,
+                backgroundUrl: detail.background?.imageUrl || item.backgroundUrl,
+                backgroundAssetId: detail.background?.id || item.backgroundAssetId,
+                hasMissingItems: (detail.missingAssetIds?.length ?? 0) > 0,
+              };
+            }),
+          );
+        }
+        setDetailsPendingCount(Math.max(0, missing.length - (i + batch.length)));
       }
     } catch (err) {
       console.warn("Background fetch details failed", err);
@@ -130,6 +137,7 @@ export default function HomePage() {
       setDetailsPendingCount(0);
     }
   }, []);
+
 
   const handleAuthWithCookie = useCallback(async (
     rawCookie: string,
@@ -151,7 +159,8 @@ export default function HomePage() {
 
       setCookie(rawCookie);
       setUser(authData.user);
-      if (save) {
+      sessionStorage.removeItem("roblox_avatar_manager_disconnected");
+      if (save && rawCookie) {
         localStorage.setItem("roblox_avatar_manager_cookie", rawCookie);
       }
 
@@ -182,7 +191,9 @@ export default function HomePage() {
       void fetchFullDetailsInBackground(rawCookie, initialOutfits, authData.user.id);
       return true;
     } catch (err) {
-      setAuthError(getErrorMessage(err, "Failed to verify account."));
+      if (rawCookie) {
+        setAuthError(getErrorMessage(err, "Failed to verify account."));
+      }
       setIsLoadingOutfits(false);
       return false;
     }
@@ -192,14 +203,21 @@ export default function HomePage() {
     const savedCookie =
       localStorage.getItem("roblox_avatar_manager_cookie") ||
       localStorage.getItem("roblox_arranger_cookie");
+    const wasDisconnected =
+      sessionStorage.getItem("roblox_avatar_manager_disconnected") === "true";
+
     const timer = window.setTimeout(() => {
-      if (!savedCookie) {
+      if (wasDisconnected && !savedCookie) {
         setIsRestoringSession(false);
         return;
       }
-      void handleAuthWithCookie(savedCookie, false).then((ok) => {
+
+      const cookieToTry = savedCookie || "";
+      void handleAuthWithCookie(cookieToTry, !!savedCookie).then((ok) => {
         setIsRestoringSession(false);
-        if (!ok) setIsAuthOpen(true);
+        if (!ok && savedCookie) {
+          setIsAuthOpen(true);
+        }
       });
     }, 0);
     return () => window.clearTimeout(timer);
@@ -212,10 +230,11 @@ export default function HomePage() {
     setHasBackupThisSession(false);
     localStorage.removeItem("roblox_avatar_manager_cookie");
     localStorage.removeItem("roblox_arranger_cookie");
+    sessionStorage.setItem("roblox_avatar_manager_disconnected", "true");
   };
 
   // Drag and drop - ID based & zero mid-flight layout thrashing
-  const handleDragStart = (e: React.DragEvent, id: number) => {
+  const handleDragStart = useCallback((e: React.DragEvent, id: number) => {
     draggedIdRef.current = id;
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", id.toString());
@@ -224,9 +243,9 @@ export default function HomePage() {
       overId: null,
       position: null,
     });
-  };
+  }, []);
 
-  const handleDragOver = (e: React.DragEvent, targetId: number) => {
+  const handleDragOver = useCallback((e: React.DragEvent, targetId: number) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
 
@@ -244,57 +263,59 @@ export default function HomePage() {
       position = e.clientY < midY ? "before" : "after";
     }
 
-    if (dragState.overId !== targetId || dragState.position !== position) {
-      setDragState({
+    setDragState((prev) => {
+      if (prev.overId === targetId && prev.position === position) return prev;
+      return {
         draggedId: sourceId,
         overId: targetId,
         position,
-      });
-    }
-  };
+      };
+    });
+  }, [viewMode]);
 
-  const handleDragEnd = () => {
+  const handleDragEnd = useCallback(() => {
     draggedIdRef.current = null;
     setDragState({
       draggedId: null,
       overId: null,
       position: null,
     });
-  };
+  }, []);
 
-  const handleDrop = (e: React.DragEvent, targetId: number) => {
+  const handleDrop = useCallback((e: React.DragEvent, targetId: number) => {
     e.preventDefault();
     const sourceId = draggedIdRef.current;
-    const position = dragState.position || "before";
-
     draggedIdRef.current = null;
-    setDragState({
-      draggedId: null,
-      overId: null,
-      position: null,
-    });
 
-    if (!sourceId || sourceId === targetId) return;
+    setDragState((prev) => {
+      const position = prev.position || "before";
+      if (sourceId && sourceId !== targetId) {
+        setOutfits((prevOutfits) => {
+          const sourceIndex = prevOutfits.findIndex((o) => o.id === sourceId);
+          const targetIndex = prevOutfits.findIndex((o) => o.id === targetId);
+          if (sourceIndex === -1 || targetIndex === -1) return prevOutfits;
 
-    setOutfits((prev) => {
-      const sourceIndex = prev.findIndex((o) => o.id === sourceId);
-      const targetIndex = prev.findIndex((o) => o.id === targetId);
-      if (sourceIndex === -1 || targetIndex === -1) return prev;
+          const next = [...prevOutfits];
+          const [movedItem] = next.splice(sourceIndex, 1);
 
-      const next = [...prev];
-      const [movedItem] = next.splice(sourceIndex, 1);
+          let insertIndex = next.findIndex((o) => o.id === targetId);
+          if (insertIndex === -1) return prevOutfits;
 
-      let insertIndex = next.findIndex((o) => o.id === targetId);
-      if (insertIndex === -1) return prev;
+          if (position === "after") {
+            insertIndex += 1;
+          }
 
-      if (position === "after") {
-        insertIndex += 1;
+          next.splice(insertIndex, 0, movedItem);
+          return next.map((item, idx) => ({ ...item, currentIndex: idx }));
+        });
       }
-
-      next.splice(insertIndex, 0, movedItem);
-      return next.map((item, idx) => ({ ...item, currentIndex: idx }));
+      return {
+        draggedId: null,
+        overId: null,
+        position: null,
+      };
     });
-  };
+  }, []);
 
   const scrollLockRef = useRef<number | null>(null);
 
@@ -306,7 +327,7 @@ export default function HomePage() {
     }
   }, [outfits]);
 
-  const moveOutfitById = (outfitId: number, targetIndex: number) => {
+  const moveOutfitById = useCallback((outfitId: number, targetIndex: number) => {
     if (typeof window !== "undefined") {
       scrollLockRef.current = window.scrollY;
     }
@@ -336,36 +357,53 @@ export default function HomePage() {
         window.scrollTo({ top: savedY, behavior: "instant" });
       });
     }
-  };
+  }, []);
 
-  const handleMoveToTop = (id: number) => moveOutfitById(id, 0);
-  const handleMoveToBottom = (id: number) =>
-    moveOutfitById(id, outfits.length - 1);
-  const handleMoveUp = (id: number) => {
-    const idx = outfits.findIndex((o) => o.id === id);
-    if (idx > 0) moveOutfitById(id, idx - 1);
-  };
-  const handleMoveDown = (id: number) => {
-    const idx = outfits.findIndex((o) => o.id === id);
-    if (idx !== -1 && idx < outfits.length - 1) moveOutfitById(id, idx + 1);
-  };
-  const handleMoveToPosition = (id: number, pos1Based: number) => {
+  const handleMoveToTop = useCallback((id: number) => moveOutfitById(id, 0), [moveOutfitById]);
+  const handleMoveToBottom = useCallback((id: number) => {
+    setOutfits((prev) => {
+      const fromIndex = prev.findIndex((o) => o.id === id);
+      if (fromIndex === -1 || fromIndex === prev.length - 1) return prev;
+      const updated = [...prev];
+      const [item] = updated.splice(fromIndex, 1);
+      updated.push(item);
+      return updated.map((it, idx) => ({ ...it, currentIndex: idx }));
+    });
+  }, []);
+
+  const handleMoveUp = useCallback((id: number) => {
+    setOutfits((prev) => {
+      const idx = prev.findIndex((o) => o.id === id);
+      if (idx <= 0) return prev;
+      const updated = [...prev];
+      const [item] = updated.splice(idx, 1);
+      updated.splice(idx - 1, 0, item);
+      return updated.map((it, i) => ({ ...it, currentIndex: i }));
+    });
+  }, []);
+
+  const handleMoveDown = useCallback((id: number) => {
+    setOutfits((prev) => {
+      const idx = prev.findIndex((o) => o.id === id);
+      if (idx === -1 || idx >= prev.length - 1) return prev;
+      const updated = [...prev];
+      const [item] = updated.splice(idx, 1);
+      updated.splice(idx + 1, 0, item);
+      return updated.map((it, i) => ({ ...it, currentIndex: i }));
+    });
+  }, []);
+
+  const handleMoveToPosition = useCallback((id: number, pos1Based: number) => {
     if (isNaN(pos1Based)) return;
     moveOutfitById(id, pos1Based - 1);
-  };
+  }, [moveOutfitById]);
 
-  const handleToggleExclude = (id: number) => {
+  const handleToggleExclude = useCallback((id: number) => {
     setOutfits((prev) =>
       prev.map((o) => (o.id === id ? { ...o, isExcluded: !o.isExcluded } : o)),
     );
-  };
+  }, []);
 
-  const handleReverseOrder = () => {
-    setOutfits((prev) => {
-      const reversed = [...prev].reverse();
-      return reversed.map((item, idx) => ({ ...item, currentIndex: idx }));
-    });
-  };
 
   const handleResetOrder = () => {
     setOutfits((prev) => {
@@ -404,9 +442,13 @@ export default function HomePage() {
     handleAuthWithCookie(cookie, false);
   };
 
-  const handleExportOutfit = (outfit: ArrangedOutfit) => {
+  const handleInspect = useCallback((o: ArrangedOutfit) => setInspectingOutfit(o), []);
+  const handlePatch = useCallback((o: ArrangedOutfit) => setPatchingOutfit(o), []);
+  const handleDelete = useCallback((o: ArrangedOutfit) => setDeletingOutfit(o), []);
+
+  const handleExportOutfit = useCallback((outfit: ArrangedOutfit) => {
     downloadOutfitExportJson(outfit, user);
-  };
+  }, [user]);
 
   const handleDownloadBackup = () => {
     if (outfits.length === 0) return false;
@@ -420,30 +462,7 @@ export default function HomePage() {
         displayName: user?.displayName || "Player",
       },
       totalOutfits: outfits.length,
-      outfits: outfits.map((item, index) => {
-        const colors = extractOutfitColors(item.details || item);
-        return {
-          id: item.id,
-          name: item.name,
-          playerAvatarType: item.details?.playerAvatarType || "R15",
-          bodyColors: colors.bodyColors,
-          bodyColor3s: colors.bodyColor3s,
-          scale: item.details?.scale || {
-            height: 1,
-            width: 1,
-            head: 1,
-            depth: 1,
-            proportion: 0,
-            bodyType: 0,
-          },
-          assetIds: item.details?.assets
-            ? item.details.assets.map((a) => a.id)
-            : [],
-          assets: item.details?.assets || [],
-          thumbnailUrl: item.thumbnailUrl,
-          orderIndex: index,
-        };
-      }),
+      outfits: outfits.map((item, index) => buildOutfitExportEntry(item, index)),
     };
 
     const blob = new Blob([JSON.stringify(manifest, null, 2)], {
@@ -550,6 +569,12 @@ export default function HomePage() {
       return true;
     });
   }, [outfits, searchQuery, filterIssuesOnly]);
+
+  const indexMap = useMemo(() => {
+    const map = new Map<number, number>();
+    outfits.forEach((o, i) => map.set(o.id, i));
+    return map;
+  }, [outfits]);
 
   const hasOrderChanged = outfits.some((o, i) => o.originalIndex !== i);
   const activeCount = outfits.filter((o) => !o.isExcluded).length;
@@ -686,14 +711,6 @@ export default function HomePage() {
               </div>
 
               <div className="flex items-center gap-2.5">
-                <button
-                  onClick={handleReverseOrder}
-                  className="flex items-center gap-2 px-3.5 py-2 text-sm font-medium text-zinc-300 hover:text-white bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg transition"
-                  title="Reverse sequence"
-                >
-                  <ArrowUpDown className="w-4 h-4" />
-                  <span>Reverse Order</span>
-                </button>
                 <button
                   onClick={handleSortAZ}
                   className="px-3.5 py-2 text-sm font-medium text-zinc-300 hover:text-white bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg transition"
@@ -838,9 +855,7 @@ export default function HomePage() {
                 }}
               >
                 {filteredOutfits.map((outfit) => {
-                  const actualIndex = outfits.findIndex(
-                    (o) => o.id === outfit.id,
-                  );
+                  const actualIndex = indexMap.get(outfit.id) ?? 0;
                   const isDragging = dragState.draggedId === outfit.id;
                   const dropIndicator =
                     dragState.overId === outfit.id ? dragState.position : null;
@@ -858,11 +873,11 @@ export default function HomePage() {
                       onMoveUp={handleMoveUp}
                       onMoveDown={handleMoveDown}
                       onMoveToPosition={handleMoveToPosition}
-                      onInspect={(o) => setInspectingOutfit(o)}
+                      onInspect={handleInspect}
                       onToggleExclude={handleToggleExclude}
-                      onPatch={(o) => setPatchingOutfit(o)}
+                      onPatch={handlePatch}
                       onExport={handleExportOutfit}
-                      onDelete={(o) => setDeletingOutfit(o)}
+                      onDelete={handleDelete}
                       isFetchingDetails={isFetchingDetails}
                       onDragStart={handleDragStart}
                       onDragOver={handleDragOver}
@@ -888,9 +903,7 @@ export default function HomePage() {
                 }}
               >
                 {filteredOutfits.map((outfit) => {
-                  const actualIndex = outfits.findIndex(
-                    (o) => o.id === outfit.id,
-                  );
+                  const actualIndex = indexMap.get(outfit.id) ?? 0;
                   const isDragging = dragState.draggedId === outfit.id;
                   const dropIndicator =
                     dragState.overId === outfit.id ? dragState.position : null;
@@ -908,11 +921,11 @@ export default function HomePage() {
                       onMoveUp={handleMoveUp}
                       onMoveDown={handleMoveDown}
                       onMoveToPosition={handleMoveToPosition}
-                      onInspect={(o) => setInspectingOutfit(o)}
+                      onInspect={handleInspect}
                       onToggleExclude={handleToggleExclude}
-                      onPatch={(o) => setPatchingOutfit(o)}
+                      onPatch={handlePatch}
                       onExport={handleExportOutfit}
-                      onDelete={(o) => setDeletingOutfit(o)}
+                      onDelete={handleDelete}
                       isFetchingDetails={isFetchingDetails}
                       onDragStart={handleDragStart}
                       onDragOver={handleDragOver}
@@ -993,14 +1006,16 @@ export default function HomePage() {
         </a>
       </footer>
 
-      {/* Modals */}
-      <CookieModal
-        isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
-        onSubmitCookie={(c) => handleAuthWithCookie(c, true)}
-        isLoading={isLoadingOutfits}
-        errorMessage={authError}
-      />
+      {/* Modals - Unmounted when closed to avoid keeping heavy subtrees in memory */}
+      {isAuthOpen && (
+        <CookieModal
+          isOpen={isAuthOpen}
+          onClose={() => setIsAuthOpen(false)}
+          onSubmitCookie={(c) => handleAuthWithCookie(c, true)}
+          isLoading={isLoadingOutfits}
+          errorMessage={authError}
+        />
+      )}
 
       {activeInspectingOutfit && (
         <OutfitDetailModal
@@ -1017,18 +1032,20 @@ export default function HomePage() {
         />
       )}
 
-      <ExportImportModal
-        isOpen={isExportImportOpen}
-        onClose={() => setIsExportImportOpen(false)}
-        defaultTab={exportImportTab}
-        outfits={outfits}
-        user={user}
-        onImportOutfits={handleImportOutfits}
-        onBackupCreated={() => setHasBackupThisSession(true)}
-        onFetchMissingDetails={async () => {
-          if (cookie) await fetchFullDetailsInBackground(cookie, outfits, user?.id);
-        }}
-      />
+      {isExportImportOpen && (
+        <ExportImportModal
+          isOpen={isExportImportOpen}
+          onClose={() => setIsExportImportOpen(false)}
+          defaultTab={exportImportTab}
+          outfits={outfits}
+          user={user}
+          onImportOutfits={handleImportOutfits}
+          onBackupCreated={() => setHasBackupThisSession(true)}
+          onFetchMissingDetails={async () => {
+            if (cookie) await fetchFullDetailsInBackground(cookie, outfits, user?.id);
+          }}
+        />
+      )}
 
       {deletingOutfit && (
         <DeleteOutfitModal
@@ -1037,8 +1054,6 @@ export default function HomePage() {
           onClose={() => setDeletingOutfit(null)}
           outfit={outfits.find((o) => o.id === deletingOutfit.id) || deletingOutfit}
           cookie={cookie}
-          hasBackupThisSession={hasBackupThisSession}
-          onDownloadBackupIfNeeded={downloadBackupIfNeeded}
           onDeleted={handleOutfitDeleted}
         />
       )}
@@ -1055,58 +1070,66 @@ export default function HomePage() {
         />
       )}
 
-      <DryRunModal
-        isOpen={isDryRunOpen}
-        onClose={() => setIsDryRunOpen(false)}
-        outfits={outfits}
-        user={user}
-        cookie={cookie}
-        onProceedToExecute={(delay) => {
-          setExecutionDelay(delay);
-          setIsExecutionOpen(true);
-        }}
-      />
+      {isDryRunOpen && (
+        <DryRunModal
+          isOpen={isDryRunOpen}
+          onClose={() => setIsDryRunOpen(false)}
+          outfits={outfits}
+          user={user}
+          cookie={cookie}
+          onProceedToExecute={(delay) => {
+            setExecutionDelay(delay);
+            setIsExecutionOpen(true);
+          }}
+        />
+      )}
 
-      <ExecutionModal
-        isOpen={isExecutionOpen}
-        onClose={() => setIsExecutionOpen(false)}
-        outfits={outfits}
-        user={user}
-        cookie={cookie}
-        delaySeconds={executionDelay}
-        hasBackupThisSession={hasBackupThisSession}
-        onDownloadBackupIfNeeded={downloadBackupIfNeeded}
-        onDownloadBackup={handleDownloadBackup}
-        onExecutionComplete={() => {
-          if (cookie) {
-            handleAuthWithCookie(cookie, false);
-          } else {
-            setOutfits((prev) =>
-              prev.map((item, idx) => ({
-                ...item,
-                originalIndex: idx,
-                currentIndex: idx,
-              })),
-            );
-          }
-        }}
-      />
+      {isExecutionOpen && (
+        <ExecutionModal
+          isOpen={isExecutionOpen}
+          onClose={() => setIsExecutionOpen(false)}
+          outfits={outfits}
+          user={user}
+          cookie={cookie}
+          delaySeconds={executionDelay}
+          hasBackupThisSession={hasBackupThisSession}
+          onDownloadBackupIfNeeded={downloadBackupIfNeeded}
+          onDownloadBackup={handleDownloadBackup}
+          onExecutionComplete={() => {
+            if (cookie) {
+              handleAuthWithCookie(cookie, false);
+            } else {
+              setOutfits((prev) =>
+                prev.map((item, idx) => ({
+                  ...item,
+                  originalIndex: idx,
+                  currentIndex: idx,
+                })),
+              );
+            }
+          }}
+        />
+      )}
 
-      <BulkDeleteModal
-        isOpen={isBulkDeleteOpen}
-        onClose={() => setIsBulkDeleteOpen(false)}
-        outfits={outfits}
-        user={user}
-        cookie={cookie}
-        delaySeconds={executionDelay}
-        hasBackupThisSession={hasBackupThisSession}
-        onDownloadBackupIfNeeded={downloadBackupIfNeeded}
-        onDeletionComplete={() => {
-          if (cookie) handleAuthWithCookie(cookie, false);
-        }}
-      />
+      {isBulkDeleteOpen && (
+        <BulkDeleteModal
+          isOpen={isBulkDeleteOpen}
+          onClose={() => setIsBulkDeleteOpen(false)}
+          outfits={outfits}
+          user={user}
+          cookie={cookie}
+          delaySeconds={executionDelay}
+          hasBackupThisSession={hasBackupThisSession}
+          onDownloadBackupIfNeeded={downloadBackupIfNeeded}
+          onDeletionComplete={() => {
+            if (cookie) handleAuthWithCookie(cookie, false);
+          }}
+        />
+      )}
 
-      <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+      {isHelpOpen && (
+        <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+      )}
     </div>
   );
 }

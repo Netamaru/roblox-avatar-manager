@@ -17,9 +17,10 @@ import {
   Loader2,
   Trash2,
   User,
+  Sparkles,
 } from "lucide-react";
 import Image from "next/image";
-import { useState } from "react";
+import { memo, useState } from "react";
 
 interface OutfitCardProps {
   outfit: ArrangedOutfit;
@@ -46,7 +47,7 @@ interface OutfitCardProps {
   dropIndicator?: "before" | "after" | null;
 }
 
-export default function OutfitCard({
+export default memo(function OutfitCard({
   outfit,
   actualIndex,
   totalOutfits,
@@ -80,6 +81,10 @@ export default function OutfitCard({
     outfit.details && (missingCount > 0 || outfit.hasMissingItems)
   );
   const isLoadingDetails = isFetchingDetails && !outfit.details;
+  const bgUrl = outfit.backgroundUrl || outfit.details?.background?.imageUrl;
+  const hasBackground = Boolean(
+    bgUrl || outfit.backgroundAssetId || outfit.details?.background
+  );
 
   const handleJumpSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,8 +103,7 @@ export default function OutfitCard({
         onDragOver={(e) => onDragOver(e, outfit.id)}
         onDragEnd={onDragEnd}
         onDrop={(e) => onDrop(e, outfit.id)}
-        className={`group relative flex items-center justify-between p-3 rounded-xl border transition-all duration-150 select-none ${
-          isDragging
+        className={`group relative flex items-center justify-between p-3 rounded-xl border transition-all duration-150 select-none [content-visibility:auto] [contain-intrinsic-size:0_64px] ${isDragging
             ? "opacity-30 border-dashed border-sky-500 bg-sky-950/20 scale-[0.99]"
             : dropIndicator
               ? "border-sky-500 ring-2 ring-sky-500/50 bg-sky-950/25 shadow-md"
@@ -108,7 +112,7 @@ export default function OutfitCard({
                 : hasMissing
                   ? "border-amber-500/70 bg-amber-950/20 hover:bg-amber-950/30 hover:border-amber-400 ring-1 ring-amber-500/30"
                   : "border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900 hover:border-zinc-700"
-        }`}
+          }`}
       >
         {/* Insertion Indicator Bars */}
         {dropIndicator === "before" && (
@@ -126,9 +130,8 @@ export default function OutfitCard({
 
         <div className="flex items-center gap-3.5 min-w-0">
           <div
-            className={`cursor-grab active:cursor-grabbing text-zinc-500 group-hover:text-zinc-300 p-1 rounded-md transition ${
-              isExcluded ? "cursor-not-allowed opacity-30" : ""
-            }`}
+            className={`cursor-grab active:cursor-grabbing text-zinc-500 group-hover:text-zinc-300 p-1 rounded-md transition ${isExcluded ? "cursor-not-allowed opacity-30" : ""
+              }`}
             title="Drag to reorder"
           >
             <GripVertical className="w-4.5 h-4.5" />
@@ -185,23 +188,34 @@ export default function OutfitCard({
           )}
 
           <div className="relative w-11 h-11 rounded-lg bg-zinc-950 border border-zinc-800 shrink-0 overflow-hidden">
+            {bgUrl && (
+              <Image
+                src={hdThumbnailUrl(bgUrl)}
+                alt="Background"
+                fill
+                className="object-cover"
+                unoptimized
+                loading={actualIndex < 12 ? "eager" : "lazy"}
+                priority={actualIndex < 4}
+              />
+            )}
             {outfit.thumbnailUrl ? (
               <Image
                 src={hdThumbnailUrl(outfit.thumbnailUrl)}
                 alt={outfit.name}
                 fill
-                className="object-contain p-1"
+                className={`object-contain p-1 relative z-[1] ${bgUrl ? "drop-shadow-sm" : ""}`}
                 unoptimized
                 loading={actualIndex < 12 ? "eager" : "lazy"}
                 priority={actualIndex < 4}
               />
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-zinc-600">
+              <div className="w-full h-full flex items-center justify-center text-zinc-600 relative z-[1]">
                 <User className="w-5 h-5" />
               </div>
             )}
             {isLoadingDetails && (
-              <div className="absolute inset-0 bg-zinc-950/70 flex items-center justify-center">
+              <div className="absolute inset-0 bg-zinc-950/70 flex items-center justify-center z-[2]">
                 <Loader2 className="w-4 h-4 text-sky-400 animate-spin" />
               </div>
             )}
@@ -230,9 +244,20 @@ export default function OutfitCard({
             <div className="flex items-center gap-2 text-xs text-zinc-400 mt-0.5">
               {isLoadingDetails ? (
                 <PulseSkeleton className="h-3 w-8" />
-              ) : rigType ? (
-                <span className="font-medium">{rigType}</span>
-              ) : null}
+              ) : (
+                <>
+                  {rigType && <span className="font-medium">{rigType}</span>}
+                  {hasBackground && (
+                    <span
+                      className="flex items-center gap-1 text-[10px] font-medium text-purple-300 bg-purple-950/70 px-1.5 py-0.5 rounded border border-purple-800/60"
+                      title={`Avatar Background: ${outfit.details?.background?.name || "Equipped"}`}
+                    >
+                      <Sparkles className="w-2.5 h-2.5 text-purple-400" />
+                      <span>Background</span>
+                    </span>
+                  )}
+                </>
+              )}
               {isPositionChanged && (
                 <span className="text-zinc-500">
                   • Original: #{outfit.originalIndex + 1}
@@ -338,8 +363,7 @@ export default function OutfitCard({
       onDragOver={(e) => onDragOver(e, outfit.id)}
       onDragEnd={onDragEnd}
       onDrop={(e) => onDrop(e, outfit.id)}
-      className={`group relative flex flex-col rounded-xl border transition-all duration-150 select-none overflow-hidden ${
-        isDragging
+      className={`group relative flex flex-col rounded-xl border transition-all duration-150 select-none overflow-hidden [content-visibility:auto] [contain-intrinsic-size:0_320px] ${isDragging
           ? "opacity-30 border-dashed border-sky-500 bg-sky-950/20 scale-[0.98]"
           : dropIndicator
             ? "border-sky-500 ring-2 ring-sky-500/50 bg-sky-950/20 shadow-lg"
@@ -348,7 +372,7 @@ export default function OutfitCard({
               : hasMissing
                 ? "border-amber-500/70 bg-gradient-to-b from-amber-950/20 via-zinc-900/70 to-zinc-900/90 hover:border-amber-400 ring-1 ring-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.08)]"
                 : "border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900 hover:border-zinc-700 hover:shadow-lg"
-      }`}
+        }`}
     >
       {/* Insertion Indicator Bars */}
       {dropIndicator === "before" && (
@@ -368,9 +392,8 @@ export default function OutfitCard({
       <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-zinc-800/80 bg-zinc-950/40">
         <div className="flex items-center gap-2">
           <div
-            className={`cursor-grab active:cursor-grabbing text-zinc-500 group-hover:text-zinc-300 p-0.5 rounded transition ${
-              isExcluded ? "cursor-not-allowed opacity-30" : ""
-            }`}
+            className={`cursor-grab active:cursor-grabbing text-zinc-500 group-hover:text-zinc-300 p-0.5 rounded transition ${isExcluded ? "cursor-not-allowed opacity-30" : ""
+              }`}
             title="Drag to reorder"
           >
             <GripVertical className="w-4 h-4" />
@@ -445,15 +468,6 @@ export default function OutfitCard({
           <button
             type="button"
             draggable={false}
-            onClick={() => onDelete(outfit)}
-            className="p-1 text-zinc-400 hover:text-red-300 hover:bg-red-950/50 rounded-md transition cursor-pointer"
-            title="Delete from Roblox"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            draggable={false}
             onClick={() => onToggleExclude(outfit.id)}
             className="p-1 text-zinc-400 hover:text-zinc-200 rounded-md transition"
             title={isExcluded ? "Re-include" : "Exclude"}
@@ -465,6 +479,23 @@ export default function OutfitCard({
 
       {/* Thumbnail */}
       <div className="relative w-full aspect-square bg-zinc-950 flex items-center justify-center p-2.5 overflow-hidden">
+        {bgUrl ? (
+          <>
+            <Image
+              src={hdThumbnailUrl(bgUrl)}
+              alt="Avatar Background"
+              fill
+              className="object-cover transition-transform duration-300 group-hover:scale-105"
+              unoptimized
+              loading={actualIndex < 12 ? "eager" : "lazy"}
+              priority={actualIndex < 4}
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/50 via-transparent to-zinc-950/20 pointer-events-none" />
+          </>
+        ) : (
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.03),transparent_70%)] pointer-events-none" />
+        )}
+
         {hasMissing && (
           <div
             className="absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-950/90 border border-amber-500/60 text-amber-300 text-[11px] font-semibold backdrop-blur-sm shadow-md"
@@ -480,13 +511,13 @@ export default function OutfitCard({
             src={hdThumbnailUrl(outfit.thumbnailUrl)}
             alt={outfit.name}
             fill
-            className="object-contain p-2 transition-transform duration-200 group-hover:scale-105"
+            className={`object-contain p-2 relative z-[1] transition-transform duration-200 group-hover:scale-105 ${bgUrl ? "drop-shadow-[0_4px_6px_rgba(0,0,0,0.4)]" : ""}`}
             unoptimized
             loading={actualIndex < 12 ? "eager" : "lazy"}
             priority={actualIndex < 4}
           />
         ) : (
-          <div className="w-14 h-14 rounded-xl bg-zinc-900 flex items-center justify-center text-zinc-600">
+          <div className="w-14 h-14 rounded-xl bg-zinc-900 flex items-center justify-center text-zinc-600 relative z-[1]">
             <User className="w-8 h-8" />
           </div>
         )}
@@ -501,7 +532,7 @@ export default function OutfitCard({
         )}
 
         <div
-          className="absolute inset-0 bg-zinc-950/75 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 backdrop-blur-[2px] p-2 z-10"
+          className="absolute inset-0 bg-zinc-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 group-hover:backdrop-blur-xs p-2 z-10"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <button
@@ -561,12 +592,23 @@ export default function OutfitCard({
           <div className="flex items-center justify-between gap-1.5 mt-1">
             {isLoadingDetails ? (
               <PulseSkeleton className="h-3 w-8" />
-            ) : rigType ? (
-              <span className="text-xs text-zinc-400 font-medium inline-block">
-                {rigType}
-              </span>
             ) : (
-              <span />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {rigType && (
+                  <span className="text-xs text-zinc-400 font-medium inline-block">
+                    {rigType}
+                  </span>
+                )}
+                {hasBackground && (
+                  <span
+                    className="flex items-center gap-1 text-[10px] font-medium text-purple-300 bg-purple-950/70 px-1.5 py-0.5 rounded border border-purple-800/60 shrink-0"
+                    title={`Avatar Background: ${outfit.details?.background?.name || "Equipped"}`}
+                  >
+                    <Sparkles className="w-2.5 h-2.5 text-purple-400" />
+                    <span>Background</span>
+                  </span>
+                )}
+              </div>
             )}
             {hasMissing && (
               <span
@@ -665,4 +707,4 @@ export default function OutfitCard({
       </div>
     </div>
   );
-}
+});

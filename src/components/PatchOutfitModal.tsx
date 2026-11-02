@@ -91,13 +91,13 @@ const SCALE_FIELDS: {
   max: number;
   step: number;
 }[] = [
-  { key: "height", label: "Height", min: 0.9, max: 1.05, step: 0.01 },
-  { key: "width", label: "Width", min: 0.7, max: 1, step: 0.01 },
-  { key: "head", label: "Head", min: 0.95, max: 1, step: 0.01 },
-  { key: "depth", label: "Depth", min: 0.7, max: 1, step: 0.01 },
-  { key: "proportion", label: "Proportion", min: 0, max: 1, step: 0.01 },
-  { key: "bodyType", label: "Body Type", min: 0, max: 1, step: 0.01 },
-];
+    { key: "height", label: "Height", min: 0.9, max: 1.05, step: 0.01 },
+    { key: "width", label: "Width", min: 0.7, max: 1, step: 0.01 },
+    { key: "head", label: "Head", min: 0.95, max: 1, step: 0.01 },
+    { key: "depth", label: "Depth", min: 0.7, max: 1, step: 0.01 },
+    { key: "proportion", label: "Proportion", min: 0, max: 1, step: 0.01 },
+    { key: "bodyType", label: "Body Type", min: 0, max: 1, step: 0.01 },
+  ];
 
 const QUICK_BRICK_IDS = [
   125, 18, 5, 12, 36, 1030, 192, 217, 26, 1, 194, 21, 23, 37, 24, 104,
@@ -279,6 +279,13 @@ export default function PatchOutfitModal({
 
   if (!isOpen || !outfit) return null;
 
+  const bgUrl =
+    jsonCandidate?.backgroundUrl ||
+    jsonCandidate?.background?.imageUrl ||
+    outfit.backgroundUrl ||
+    currentDetails?.background?.imageUrl ||
+    outfit.details?.background?.imageUrl;
+
   const showAppearanceSkeleton = isLoadingDetails && !isJsonProvided;
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -406,10 +413,21 @@ export default function PatchOutfitModal({
         isEditable: true,
       };
 
+      const updatedBackground =
+        updatedDetails.background ||
+        jsonCandidate?.background ||
+        outfit.details?.background;
+      const updatedBackgroundUrl =
+        updatedBackground?.imageUrl ||
+        jsonCandidate?.backgroundUrl ||
+        outfit.backgroundUrl;
+
       const updatedArranged: ArrangedOutfit = {
         ...outfit,
         name: finalName,
         thumbnailUrl: json.thumbnailUrl || outfit.thumbnailUrl,
+        backgroundUrl: updatedBackgroundUrl,
+        backgroundAssetId: updatedBackground?.id || outfit.backgroundAssetId,
         details: updatedDetails,
         isLoaded: true,
         hasMissingItems: (updatedDetails.missingAssetIds?.length ?? 0) > 0,
@@ -468,16 +486,25 @@ export default function PatchOutfitModal({
           <div className="p-3 bg-zinc-900/60 border border-zinc-800/80 rounded-xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <div className="relative w-12 h-12 rounded-lg bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0 flex items-center justify-center">
+                {bgUrl && (
+                  <Image
+                    src={hdThumbnailUrl(bgUrl)}
+                    alt="Background"
+                    fill
+                    className="object-cover"
+                    unoptimized
+                  />
+                )}
                 {outfit.thumbnailUrl ? (
                   <Image
                     src={hdThumbnailUrl(outfit.thumbnailUrl)}
                     alt={outfit.name}
                     fill
-                    className="object-contain p-1"
+                    className={`object-contain p-1 relative z-[1] ${bgUrl ? "drop-shadow-sm" : ""}`}
                     unoptimized
                   />
                 ) : (
-                  <User className="w-6 h-6 text-zinc-600" />
+                  <User className="w-6 h-6 text-zinc-600 relative z-[1]" />
                 )}
               </div>
               <div className="min-w-0">
@@ -542,11 +569,10 @@ export default function PatchOutfitModal({
                   </button>
                 )}
                 <span
-                  className={`text-[11px] font-mono ${
-                    customName.length >= AVATAR_NAME_MAX_LENGTH
-                      ? "text-amber-400"
-                      : "text-zinc-500"
-                  }`}
+                  className={`text-[11px] font-mono ${customName.length >= AVATAR_NAME_MAX_LENGTH
+                    ? "text-amber-400"
+                    : "text-zinc-500"
+                    }`}
                 >
                   {customName.length}/{AVATAR_NAME_MAX_LENGTH}
                 </span>
@@ -575,11 +601,10 @@ export default function PatchOutfitModal({
                   type="button"
                   disabled={showAppearanceSkeleton}
                   onClick={() => setEditedRig(rig)}
-                  className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition ${
-                    editedRig === rig
-                      ? "bg-sky-950/60 border-sky-600 text-sky-200"
-                      : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
-                  }`}
+                  className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition ${editedRig === rig
+                    ? "bg-sky-950/60 border-sky-600 text-sky-200"
+                    : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                    }`}
                 >
                   {rig}
                 </button>
@@ -752,9 +777,8 @@ export default function PatchOutfitModal({
                 </span>
               </div>
               <ChevronDown
-                className={`w-4 h-4 text-zinc-500 transition ${
-                  showAdvancedJson ? "rotate-180" : ""
-                }`}
+                className={`w-4 h-4 text-zinc-500 transition ${showAdvancedJson ? "rotate-180" : ""
+                  }`}
               />
             </button>
 
@@ -825,23 +849,31 @@ export default function PatchOutfitModal({
                             setSelectedIndex(idx);
                             applyAppearanceFromCandidate(cand);
                           }}
-                          className={`flex items-center gap-2.5 p-2 rounded-lg border text-left transition ${
-                            selectedIndex === idx
-                              ? "bg-sky-950/40 border-sky-500/60 ring-1 ring-sky-500/40 text-white"
-                              : "bg-zinc-900/60 border-zinc-800 text-zinc-300 hover:border-zinc-700"
-                          }`}
+                          className={`flex items-center gap-2.5 p-2 rounded-lg border text-left transition ${selectedIndex === idx
+                            ? "bg-sky-950/40 border-sky-500/60 ring-1 ring-sky-500/40 text-white"
+                            : "bg-zinc-900/60 border-zinc-800 text-zinc-300 hover:border-zinc-700"
+                            }`}
                         >
                           <div className="relative w-8 h-8 rounded bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0 flex items-center justify-center">
+                            {(cand.backgroundUrl || cand.background?.imageUrl) && (
+                              <Image
+                                src={hdThumbnailUrl(cand.backgroundUrl || cand.background!.imageUrl!)}
+                                alt="Background"
+                                fill
+                                className="object-cover"
+                                unoptimized
+                              />
+                            )}
                             {cand.thumbnailUrl ? (
                               <Image
                                 src={hdThumbnailUrl(cand.thumbnailUrl)}
                                 alt={cand.name || "Outfit"}
                                 fill
-                                className="object-contain"
+                                className="object-contain relative z-[1]"
                                 unoptimized
                               />
                             ) : (
-                              <User className="w-4 h-4 text-zinc-600" />
+                              <User className="w-4 h-4 text-zinc-600 relative z-[1]" />
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
@@ -905,15 +937,7 @@ export default function PatchOutfitModal({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-800 bg-zinc-950/80">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white rounded-xl transition"
-          >
-            Cancel
-          </button>
+        <div className="flex items-center justify-end px-6 py-4 border-t border-zinc-800 bg-zinc-950/80">
           <button
             type="button"
             onClick={handleApplyPatch}

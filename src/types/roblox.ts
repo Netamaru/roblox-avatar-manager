@@ -59,6 +59,11 @@ export interface RobloxOutfitDetail {
   playerAvatarType: "R6" | "R15" | string;
   isEditable?: boolean;
   missingAssetIds?: number[];
+  background?: {
+    id: number;
+    name?: string;
+    imageUrl?: string;
+  };
 }
 
 export interface OutfitColorSource {
@@ -92,6 +97,8 @@ export interface ArrangedOutfit {
   id: number;
   name: string;
   thumbnailUrl?: string;
+  backgroundUrl?: string;
+  backgroundAssetId?: number;
   details?: RobloxOutfitDetail;
   originalIndex: number;
   currentIndex: number;
@@ -121,6 +128,12 @@ export interface ExportManifest {
     assetIds: number[];
     assets?: RobloxAsset[];
     thumbnailUrl?: string;
+    background?: {
+      id: number;
+      name?: string;
+      imageUrl?: string;
+    };
+    backgroundAssetId?: number;
     orderIndex: number;
   }>;
 }

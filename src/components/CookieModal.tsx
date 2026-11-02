@@ -1,7 +1,7 @@
 "use client";
 
-import { AlertCircle, ChevronDown, ChevronRight, Loader2, X } from "lucide-react";
-import { useState } from "react";
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, KeyRound, Loader2, X } from "lucide-react";
+import { useEffect, useState } from "react";
 
 interface CookieModalProps {
   isOpen: boolean;
@@ -20,6 +20,28 @@ export default function CookieModal({
 }: CookieModalProps) {
   const [cookieInput, setCookieInput] = useState("");
   const [showTutorial, setShowTutorial] = useState(false);
+  const [hasEnvCookie, setHasEnvCookie] = useState(false);
+  const [checkingEnv, setCheckingEnv] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let mounted = true;
+    setCheckingEnv(true);
+    fetch("/api/roblox/auth")
+      .then((res) => res.json())
+      .then((data) => {
+        if (mounted && data?.hasEnvCookie) {
+          setHasEnvCookie(true);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (mounted) setCheckingEnv(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -27,6 +49,14 @@ export default function CookieModal({
     e.preventDefault();
     if (!cookieInput.trim()) return;
     const ok = await onSubmitCookie(cookieInput.trim());
+    if (ok) {
+      setCookieInput("");
+      onClose();
+    }
+  };
+
+  const handleUseEnv = async () => {
+    const ok = await onSubmitCookie("");
     if (ok) {
       setCookieInput("");
       onClose();
@@ -58,6 +88,28 @@ export default function CookieModal({
               </div>
             </div>
           )}
+
+          {hasEnvCookie && (
+            <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-emerald-100">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-emerald-200">Cookie .env Terdeteksi</p>
+                  <p className="text-[11px] text-emerald-300/80 truncate">Tersedia cookie di file .env server.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleUseEnv}
+                disabled={isLoading}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-zinc-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition disabled:opacity-40 shadow-sm"
+              >
+                {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
+                <span>Gunakan .env</span>
+              </button>
+            </div>
+          )}
+
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">

@@ -265,7 +265,7 @@ export default function DryRunModal({
             <span className="font-semibold text-zinc-200 text-sm">
               Save plan ({planItems.length} steps):
             </span>
-            <div className="max-h-48 overflow-y-auto divide-y divide-zinc-800 rounded-xl border border-zinc-800 bg-zinc-900/50 text-xs">
+            <div className="max-h-48 overflow-y-auto divide-y divide-zinc-800 rounded-xl border border-zinc-800 bg-zinc-900/50 text-xs custom-scrollbar">
               {planItems.map((item) => (
                 <div key={item.step} className="p-2.5 flex items-center justify-between gap-2.5">
                   <div className="flex items-center gap-2.5 truncate">

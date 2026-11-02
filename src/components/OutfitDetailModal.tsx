@@ -6,6 +6,7 @@ import {
   outfitExportFilename,
 } from "@/lib/outfit-json";
 import { formatCssHex } from "@/lib/roblox-colors";
+import { isAvatarBackgroundAsset } from "@/lib/roblox-server";
 import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
 import { ArrangedOutfit, RobloxUser } from "@/types/roblox";
 import {
@@ -84,15 +85,15 @@ function getBrickColorHex(id: number | undefined): string {
 
 interface JsonToken {
   type:
-    | "key"
-    | "colon"
-    | "string"
-    | "number"
-    | "boolean"
-    | "null"
-    | "punctuation"
-    | "whitespace"
-    | "text";
+  | "key"
+  | "colon"
+  | "string"
+  | "number"
+  | "boolean"
+  | "null"
+  | "punctuation"
+  | "whitespace"
+  | "text";
   text: string;
 }
 
@@ -274,6 +275,29 @@ export default function OutfitDetailModal({
   const scale = details?.scale;
   const assets = details?.assets || [];
 
+  const bgAsset = assets.find(isAvatarBackgroundAsset);
+  const backgroundInfo =
+    details?.background ||
+    (bgAsset
+      ? {
+        id: bgAsset.id,
+        name: bgAsset.name,
+        imageUrl:
+          outfit.backgroundUrl ||
+          resolvedAssetThumbs[bgAsset.id] ||
+          undefined,
+      }
+      : outfit.backgroundUrl || outfit.backgroundAssetId
+        ? {
+          id: outfit.backgroundAssetId || 0,
+          imageUrl: outfit.backgroundUrl,
+        }
+        : undefined);
+  const bgUrl =
+    backgroundInfo?.imageUrl ||
+    outfit.backgroundUrl ||
+    (bgAsset ? resolvedAssetThumbs[bgAsset.id] : undefined);
+
   const missingAssetIds = new Set(details?.missingAssetIds || []);
   const isAssetMissing = (asset: { id: number; isOwned?: boolean }) =>
     asset.isOwned === false || missingAssetIds.has(asset.id);
@@ -413,27 +437,43 @@ export default function OutfitDetailModal({
         </div>
 
         {/* 2-Column Responsive Body */}
-        <div className="relative flex-1 overflow-y-auto md:overflow-hidden flex flex-col md:flex-row md:items-stretch">
-          {/* Left Column: Square Avatar Showcase & Quick Info (Defines natural height) */}
-          <div className="w-full md:w-[350px] lg:w-[370px] shrink-0 p-6 flex flex-col gap-4 bg-gradient-to-b from-zinc-900/40 via-zinc-950/60 to-zinc-950 md:border-r border-zinc-800">
+        <div className="relative flex-1 min-h-0 overflow-y-auto md:overflow-hidden flex flex-col md:flex-row md:items-stretch">
+          {/* Left Column: Square Avatar Showcase & Quick Info */}
+          <div className="w-full md:w-[350px] lg:w-[370px] shrink-0 p-6 flex flex-col gap-4 bg-gradient-to-b from-zinc-900/40 via-zinc-950/60 to-zinc-950 md:border-r border-zinc-800 md:overflow-y-auto md:max-h-full">
             <div className="space-y-4">
               {/* Square Aspect Ratio Showcase Box */}
               <div className="relative w-full aspect-square rounded-xl bg-gradient-to-b from-zinc-900 to-zinc-950 border border-zinc-800 shadow-inner flex items-center justify-center p-4 overflow-hidden group">
-                {/* Radial Glow Highlight */}
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(56,189,248,0.12),transparent_70%)] pointer-events-none" />
+                {bgUrl ? (
+                  <div className="absolute inset-0 z-0 overflow-hidden">
+                    <Image
+                      src={hdThumbnailUrl(bgUrl)}
+                      alt="Avatar Background"
+                      fill
+                      className="object-cover transition-transform duration-300 group-hover:scale-105"
+                      unoptimized
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/70 via-transparent to-zinc-950/30 pointer-events-none" />
+                  </div>
+                ) : (
+                  /* Radial Glow Highlight */
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(56,189,248,0.12),transparent_70%)] pointer-events-none" />
+                )}
 
                 {outfit.thumbnailUrl ? (
                   <Image
                     src={hdThumbnailUrl(outfit.thumbnailUrl)}
                     alt={outfit.name}
                     fill
-                    className="object-contain p-3 drop-shadow-[0_15px_25px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-105"
+                    className={`object-contain p-3 relative z-[1] transition-transform duration-300 group-hover:scale-105 ${bgUrl
+                      ? "drop-shadow-[0_15px_25px_rgba(0,0,0,0.8)]"
+                      : "drop-shadow-[0_15px_25px_rgba(0,0,0,0.6)]"
+                      }`}
                     unoptimized
                     loading="eager"
                     priority
                   />
                 ) : (
-                  <div className="flex flex-col items-center justify-center text-zinc-600 gap-2">
+                  <div className="flex flex-col items-center justify-center text-zinc-600 gap-2 relative z-[1]">
                     <User className="w-16 h-16" />
                     <span className="text-xs text-zinc-500 font-medium">
                       No preview available
@@ -456,38 +496,6 @@ export default function OutfitDetailModal({
                 <h4 className="text-lg font-bold text-white tracking-tight break-words">
                   {outfit.name}
                 </h4>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={handleCopyId}
-                    className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono text-zinc-300 hover:text-white bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 rounded-md transition cursor-pointer"
-                    title="Click to copy Outfit ID"
-                  >
-                    {copiedId ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-emerald-400 font-sans">
-                          Copied!
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5 text-zinc-400" />
-                        <span>ID: #{outfit.id}</span>
-                      </>
-                    )}
-                  </button>
-
-                  <a
-                    href={`https://www.roblox.com/bundles/${outfit.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1 px-2.5 py-1 text-xs text-zinc-400 hover:text-sky-400 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 rounded-md transition"
-                  >
-                    <span>View on Roblox</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
               </div>
             </div>
 
@@ -517,6 +525,52 @@ export default function OutfitDetailModal({
                   </span>
                 )}
               </div>
+
+              {/* Avatar Background Showcase Card */}
+              {backgroundInfo?.id && (
+                <div className="col-span-2 p-3 rounded-xl bg-purple-950/25 border border-purple-800/40 text-purple-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-purple-300">
+                      <Sparkles className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                      <span>Avatar Background</span>
+                    </div>
+                    <a
+                      href={`https://www.roblox.com/catalog/${backgroundInfo.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-purple-400 hover:text-purple-300 hover:underline flex items-center gap-1 transition"
+                    >
+                      <span>Catalog</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                  <div className="flex items-center gap-3 pt-0.5">
+                    {bgUrl ? (
+                      <div className="relative w-11 h-11 rounded-lg overflow-hidden border border-purple-800/60 shrink-0 shadow-sm">
+                        <Image
+                          src={hdThumbnailUrl(bgUrl)}
+                          alt={backgroundInfo.name || "Background"}
+                          fill
+                          className="object-cover"
+                          unoptimized
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-11 h-11 rounded-lg bg-purple-950/60 border border-purple-800/50 flex items-center justify-center text-purple-400 shrink-0">
+                        <Sparkles className="w-5 h-5" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-zinc-100 truncate">
+                        {backgroundInfo.name || `Background #${backgroundInfo.id}`}
+                      </p>
+                      <p className="text-[11px] text-zinc-400 font-mono">
+                        ID: #{backgroundInfo.id}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Missing Assets Warning Card */}
@@ -537,17 +591,16 @@ export default function OutfitDetailModal({
             )}
           </div>
 
-          {/* Right Column: Tabbed Detailed Content (Follows Left Column height) */}
-          <div className="flex-1 md:absolute md:inset-y-0 md:right-0 md:left-[350px] lg:md:left-[370px] flex flex-col bg-zinc-950 overflow-hidden border-t md:border-t-0 border-zinc-800">
+          {/* Right Column: Tabbed Detailed Content */}
+          <div className="flex-1 md:absolute md:inset-y-0 md:right-0 md:left-[350px] lg:left-[370px] flex flex-col bg-zinc-950 overflow-hidden border-t md:border-t-0 border-zinc-800">
             {/* Tabs Navigation */}
             <div className="shrink-0 flex items-center gap-2 px-6 pt-4 border-b border-zinc-800 bg-zinc-950/60">
               <button
                 onClick={() => setActiveTab("items")}
-                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${
-                  activeTab === "items"
-                    ? "border-sky-500 text-white"
-                    : "border-transparent text-zinc-400 hover:text-zinc-200"
-                }`}
+                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${activeTab === "items"
+                  ? "border-sky-500 text-white"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+                  }`}
               >
                 <Layers className="w-4 h-4" />
                 <span>Equipped Assets</span>
@@ -555,11 +608,10 @@ export default function OutfitDetailModal({
                   <PulseSkeleton className="h-5 w-7 rounded-full" />
                 ) : (
                   <span
-                    className={`px-2 py-0.5 text-xs rounded-full font-mono ${
-                      activeTab === "items"
-                        ? "bg-sky-950 text-sky-400 border border-sky-800/60"
-                        : "bg-zinc-900 text-zinc-400 border border-zinc-800"
-                    }`}
+                    className={`px-2 py-0.5 text-xs rounded-full font-mono ${activeTab === "items"
+                      ? "bg-sky-950 text-sky-400 border border-sky-800/60"
+                      : "bg-zinc-900 text-zinc-400 border border-zinc-800"
+                      }`}
                   >
                     {assets.length}
                   </span>
@@ -568,11 +620,10 @@ export default function OutfitDetailModal({
 
               <button
                 onClick={() => setActiveTab("body")}
-                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${
-                  activeTab === "body"
-                    ? "border-sky-500 text-white"
-                    : "border-transparent text-zinc-400 hover:text-zinc-200"
-                }`}
+                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${activeTab === "body"
+                  ? "border-sky-500 text-white"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+                  }`}
               >
                 <Sliders className="w-4 h-4" />
                 <span>Body & Proportions</span>
@@ -580,11 +631,10 @@ export default function OutfitDetailModal({
 
               <button
                 onClick={() => setActiveTab("json")}
-                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${
-                  activeTab === "json"
-                    ? "border-sky-500 text-white"
-                    : "border-transparent text-zinc-400 hover:text-zinc-200"
-                }`}
+                className={`flex items-center gap-2 pb-3 px-1 text-sm font-semibold border-b-2 transition ${activeTab === "json"
+                  ? "border-sky-500 text-white"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+                  }`}
               >
                 <Code className="w-4 h-4" />
                 <span>Raw JSON</span>
@@ -593,11 +643,10 @@ export default function OutfitDetailModal({
 
             {/* Tab Contents */}
             <div
-              className={`flex-1 min-h-0 ${
-                activeTab === "json"
-                  ? "p-4 sm:p-5 flex flex-col overflow-hidden"
-                  : "p-6 overflow-y-auto space-y-6"
-              }`}
+              className={`flex-1 min-h-0 ${activeTab === "json"
+                ? "p-4 sm:p-5 flex flex-col overflow-hidden"
+                : "p-6 overflow-y-auto space-y-6"
+                }`}
             >
               {activeTab === "items" ? (
                 <div className="space-y-3">
@@ -644,11 +693,10 @@ export default function OutfitDetailModal({
                             return (
                               <div
                                 key={asset.id}
-                                className={`relative rounded-xl border transition flex items-stretch overflow-hidden group ${
-                                  isMissing
-                                    ? "border-amber-500/70 bg-gradient-to-r from-amber-950/30 to-zinc-900/60 hover:bg-amber-950/40 hover:border-amber-400 ring-1 ring-amber-500/30"
-                                    : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900/80 hover:border-zinc-700"
-                                }`}
+                                className={`relative rounded-xl border transition flex items-stretch overflow-hidden group ${isMissing
+                                  ? "border-amber-500/70 bg-gradient-to-r from-amber-950/30 to-zinc-900/60 hover:bg-amber-950/40 hover:border-amber-400 ring-1 ring-amber-500/30"
+                                  : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900/80 hover:border-zinc-700"
+                                  }`}
                               >
                                 <CatalogAssetThumb
                                   name={asset.name}
@@ -675,9 +723,16 @@ export default function OutfitDetailModal({
                                     )}
                                   </div>
                                   <div className="flex items-center gap-2 text-xs text-zinc-400 font-mono">
-                                    <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[11px] font-sans font-medium">
-                                      {asset.assetType?.name || "Accessory"}
-                                    </span>
+                                    {isAvatarBackgroundAsset(asset) ? (
+                                      <span className="px-2 py-0.5 rounded bg-purple-950/80 border border-purple-700/60 text-purple-300 text-[11px] font-sans font-medium flex items-center gap-1">
+                                        <Sparkles className="w-3 h-3 text-purple-400" />
+                                        Avatar Background
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[11px] font-sans font-medium">
+                                        {asset.assetType?.name || "Accessory"}
+                                      </span>
+                                    )}
                                     <span>ID: #{asset.id}</span>
                                   </div>
                                   {isMissing && (
@@ -832,11 +887,10 @@ export default function OutfitDetailModal({
                         {/* Word Wrap Toggle */}
                         <button
                           onClick={() => setIsWordWrap(!isWordWrap)}
-                          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition cursor-pointer ${
-                            isWordWrap
-                              ? "bg-sky-950/80 text-sky-300 border-sky-800/80 shadow-xs"
-                              : "bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-zinc-750 hover:bg-zinc-750"
-                          }`}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition cursor-pointer ${isWordWrap
+                            ? "bg-sky-950/80 text-sky-300 border-sky-800/80 shadow-xs"
+                            : "bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-zinc-750 hover:bg-zinc-750"
+                            }`}
                           title={
                             isWordWrap
                               ? "Word wrap is active: text breaks to new lines without clipping"
@@ -860,11 +914,10 @@ export default function OutfitDetailModal({
                         {/* Copy JSON */}
                         <button
                           onClick={handleCopyJson}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition cursor-pointer ${
-                            copiedJson
-                              ? "bg-emerald-950/80 border-emerald-800 text-emerald-300"
-                              : "bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-200 hover:text-white"
-                          }`}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition cursor-pointer ${copiedJson
+                            ? "bg-emerald-950/80 border-emerald-800 text-emerald-300"
+                            : "bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-200 hover:text-white"
+                            }`}
                           title="Copy full JSON payload"
                         >
                           {copiedJson ? (
@@ -884,9 +937,8 @@ export default function OutfitDetailModal({
 
                     {/* Code Lines Canvas */}
                     <div
-                      className={`flex-1 min-h-0 overflow-y-auto p-3 font-mono text-xs leading-relaxed selection:bg-sky-500/30 ${
-                        isWordWrap ? "overflow-x-hidden" : "overflow-x-auto"
-                      }`}
+                      className={`flex-1 min-h-0 overflow-y-auto p-3 font-mono text-xs leading-relaxed selection:bg-sky-500/30 ${isWordWrap ? "overflow-x-hidden" : "overflow-x-auto"
+                        }`}
                     >
                       {jsonLines.map((line, lineIdx) => {
                         const tokens = tokenizeJsonLine(line);
@@ -899,11 +951,10 @@ export default function OutfitDetailModal({
                               {lineIdx + 1}
                             </span>
                             <div
-                              className={`flex-1 min-w-0 font-mono text-xs leading-5 ${
-                                isWordWrap
-                                  ? "whitespace-pre-wrap break-all"
-                                  : "whitespace-pre"
-                              }`}
+                              className={`flex-1 min-w-0 font-mono text-xs leading-5 ${isWordWrap
+                                ? "whitespace-pre-wrap break-all"
+                                : "whitespace-pre"
+                                }`}
                             >
                               {tokens.map((token, tokIdx) =>
                                 renderJsonToken(token, tokIdx),

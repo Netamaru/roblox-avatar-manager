@@ -1,8 +1,7 @@
 "use client";
 
 import { getErrorMessage } from "@/lib/error-message";
-import { importOutfitsFromJson } from "@/lib/outfit-json";
-import { extractOutfitColors } from "@/lib/roblox-colors";
+import { buildOutfitExportEntry, importOutfitsFromJson } from "@/lib/outfit-json";
 import { ArrangedOutfit, ExportManifest, RobloxUser } from "@/types/roblox";
 import { AlertTriangle, Check, Clipboard, Download, Loader2, RefreshCw, Upload, X } from "lucide-react";
 import { useState } from "react";
@@ -50,28 +49,7 @@ export default function ExportImportModal({
       displayName: user?.displayName || "Player",
     },
     totalOutfits: outfits.length,
-    outfits: outfits.map((item, index) => {
-      const colors = extractOutfitColors(item.details || item);
-      return {
-        id: item.id,
-        name: item.name,
-        playerAvatarType: item.details?.playerAvatarType || "R15",
-        bodyColors: colors.bodyColors,
-        bodyColor3s: colors.bodyColor3s,
-        scale: item.details?.scale || {
-          height: 1,
-          width: 1,
-          head: 1,
-          depth: 1,
-          proportion: 0,
-          bodyType: 0,
-        },
-        assetIds: item.details?.assets ? item.details.assets.map((a) => a.id) : [],
-        assets: item.details?.assets || [],
-        thumbnailUrl: item.thumbnailUrl,
-        orderIndex: index,
-      };
-    }),
+    outfits: outfits.map((item, index) => buildOutfitExportEntry(item, index)),
   };
 
   const jsonString = JSON.stringify(manifest, null, 2);

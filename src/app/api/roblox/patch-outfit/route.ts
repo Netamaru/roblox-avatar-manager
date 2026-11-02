@@ -1,13 +1,14 @@
 import { getErrorMessage } from "@/lib/error-message";
 import { assetIdOf } from "@/lib/outfit-json";
-import { getOutfitDetails, getOutfitThumbnails, patchOutfit } from "@/lib/roblox-server";
+import { cleanCookie, getOutfitDetails, getOutfitThumbnails, patchOutfit } from "@/lib/roblox-server";
 import { OutfitWritePayload } from "@/types/roblox";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { cookie, outfitId, name, payload, csrfToken, userId } = body;
+    const body = await req.json().catch(() => ({}));
+    const { outfitId, name, payload, csrfToken, userId } = body;
+    const cookie = cleanCookie(body?.cookie);
 
     if (!cookie || !outfitId) {
       return NextResponse.json(

@@ -1,11 +1,12 @@
 import { getErrorMessage } from "@/lib/error-message";
-import { deleteOutfit } from "@/lib/roblox-server";
+import { cleanCookie, deleteOutfit } from "@/lib/roblox-server";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { cookie, outfitId, csrfToken } = body;
+    const body = await req.json().catch(() => ({}));
+    const { outfitId, csrfToken } = body;
+    const cookie = cleanCookie(body?.cookie);
 
     if (!cookie || !outfitId) {
       return NextResponse.json(

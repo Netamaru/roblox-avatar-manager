@@ -38,6 +38,30 @@ interface OutfitDetailsResponse {
   isEditable?: boolean;
 }
 
+interface V4OutfitDetailsResponse {
+  outfitModel?: {
+    id?: string | number;
+    name?: string;
+    assets?: unknown[];
+    bodyColors?: Record<string, string>;
+    scale?: unknown;
+    playerAvatarType?: string;
+    isEditable?: boolean;
+  };
+  outfitConfigurations?: {
+    background?: {
+      backgroundAsset?: {
+        id?: number;
+        name?: string;
+        assetType?: {
+          id?: number;
+          name?: string;
+        };
+      };
+    };
+  };
+}
+
 function toPatchAssets(assets: RobloxAsset[]): Array<{
   id: number;
   meta?: RobloxAsset["meta"];
@@ -61,16 +85,31 @@ function parseRobloxErrors(errorText: string): RobloxApiError[] {
 
 const ROBLOX_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
 
-export function cleanCookie(raw: string): string {
-  let cleaned = raw.trim();
+export function cleanCookie(raw?: string): string {
+  const fromEnv =
+    process.env.cookie ||
+    process.env.COOKIE ||
+    process.env.ROBLOSECURITY ||
+    process.env.ROBLOX_COOKIE ||
+    "";
+  let cleaned =
+    typeof raw === "string" && raw.trim() ? raw.trim() : fromEnv.trim();
   if (cleaned.startsWith(".ROBLOSECURITY=")) {
     cleaned = cleaned.replace(".ROBLOSECURITY=", "");
   }
-  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+  if (
+    (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
     cleaned = cleaned.slice(1, -1);
   }
   return cleaned.trim();
 }
+
+export function hasConfiguredCookie(): boolean {
+  return cleanCookie().length > 0;
+}
+
 
 /**
  * Validates the .ROBLOSECURITY cookie and gets authenticated user details
@@ -199,32 +238,7 @@ export async function getOutfitThumbnails(outfitIds: number[]) {
   return thumbnailMap;
 }
 
-export async function getAssetThumbnails(assetIds: number[]) {
-  if (assetIds.length === 0) return {};
-  const thumbnailMap: Record<number, string> = {};
-  const batchSize = 50;
-
-  for (let i = 0; i < assetIds.length; i += batchSize) {
-    const batch = assetIds.slice(i, i + batchSize);
-    try {
-      const res = await fetch(assetThumbnailsApiUrl(batch), { cache: "no-store" });
-      if (!res.ok) continue;
-      const json = (await res.json()) as { data?: ThumbnailItem[] };
-      for (const item of json.data || []) {
-        if (item.targetId && item.imageUrl) {
-          thumbnailMap[item.targetId] = item.imageUrl;
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to fetch asset thumbnail batch", err);
-    }
-  }
-
-  return thumbnailMap;
-}
-
-// In-memory cache with TTL for asset ownership & moderation checks to avoid repeat calls within a batch
-// while still detecting newly deleted/moderated assets upon reload.
+// In-memory cache with TTL for asset ownership, moderation, and thumbnails to avoid repeat calls
 const ASSET_CHECK_CACHE_TTL_MS = 60_000;
 
 interface CacheEntry<T> {
@@ -235,6 +249,7 @@ interface CacheEntry<T> {
 const ownershipCache = new Map<string, CacheEntry<boolean>>();
 const ownershipInFlight = new Map<string, Promise<boolean>>();
 const moderationCache = new Map<number, CacheEntry<boolean>>();
+const assetThumbnailCache = new Map<number, CacheEntry<string>>();
 
 function getCachedValue<K, V>(cache: Map<K, CacheEntry<V>>, key: K): V | undefined {
   const entry = cache.get(key);
@@ -248,6 +263,60 @@ function getCachedValue<K, V>(cache: Map<K, CacheEntry<V>>, key: K): V | undefin
 
 function setCachedValue<K, V>(cache: Map<K, CacheEntry<V>>, key: K, value: V): void {
   cache.set(key, { value, expiresAt: Date.now() + ASSET_CHECK_CACHE_TTL_MS });
+}
+
+export function isAvatarBackgroundAsset(asset: {
+  id?: number;
+  name?: string;
+  assetType?: { id?: number; name?: string };
+}): boolean {
+  if (!asset) return false;
+  if (asset.assetType?.id === 92) return true;
+  const typeName = asset.assetType?.name?.toLowerCase().trim() || "";
+  return (
+    typeName === "avatarbackground" ||
+    typeName === "avatar background" ||
+    typeName === "background"
+  );
+}
+
+export async function getAssetThumbnails(assetIds: number[]) {
+  if (assetIds.length === 0) return {};
+  const thumbnailMap: Record<number, string> = {};
+  const uncachedIds: number[] = [];
+
+  for (const id of assetIds) {
+    const cached = getCachedValue(assetThumbnailCache, id);
+    if (cached !== undefined) {
+      thumbnailMap[id] = cached;
+    } else if (!uncachedIds.includes(id)) {
+      uncachedIds.push(id);
+    }
+  }
+
+  if (uncachedIds.length === 0) return thumbnailMap;
+
+  const batchSize = 50;
+
+  for (let i = 0; i < uncachedIds.length; i += batchSize) {
+    const batch = uncachedIds.slice(i, i + batchSize);
+    try {
+      const res = await fetch(assetThumbnailsApiUrl(batch), { cache: "no-store" });
+      if (!res.ok) continue;
+      const json = (await res.json()) as { data?: ThumbnailItem[] };
+      for (const item of json.data || []) {
+        if (item.targetId && item.imageUrl) {
+          const highResUrl = hdThumbnailUrl(item.imageUrl);
+          setCachedValue(assetThumbnailCache, item.targetId, highResUrl);
+          thumbnailMap[item.targetId] = highResUrl;
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to fetch asset thumbnail batch", err);
+    }
+  }
+
+  return thumbnailMap;
 }
 
 function isDevelopAssetModerated(item: DevelopAssetItem | undefined): boolean {
@@ -414,9 +483,17 @@ export async function getOutfitDetails(
 ): Promise<RobloxOutfitDetail> {
   const sanitized = cleanCookie(cookie);
 
-  // Fetch v3 (for full accessory meta like position/rotation/scale and bodyColor3s)
+  // Fetch v4 (for outfitConfigurations like AvatarBackground),
+  // v3 (for full accessory meta like position/rotation/scale and bodyColor3s),
   // and v1 (for brickColor bodyColors) in parallel
-  const [v3Res, v1Res] = await Promise.all([
+  const [v4Res, v3Res, v1Res] = await Promise.all([
+    fetch(`https://avatar.roblox.com/v4/outfits/${outfitId}/details`, {
+      headers: {
+        Cookie: `.ROBLOSECURITY=${sanitized}`,
+        "User-Agent": ROBLOX_USER_AGENT,
+      },
+      cache: "no-store",
+    }).catch(() => null),
     fetch(`https://avatar.roblox.com/v3/outfits/${outfitId}/details`, {
       headers: {
         Cookie: `.ROBLOSECURITY=${sanitized}`,
@@ -433,20 +510,26 @@ export async function getOutfitDetails(
     }).catch(() => null),
   ]);
 
+  const v4Data: V4OutfitDetailsResponse | null =
+    v4Res && v4Res.ok ? ((await v4Res.json()) as V4OutfitDetailsResponse) : null;
   const v3Data: OutfitDetailsResponse | null =
     v3Res && v3Res.ok ? ((await v3Res.json()) as OutfitDetailsResponse) : null;
   const v1Data: OutfitDetailsResponse | null =
     v1Res && v1Res.ok ? ((await v1Res.json()) as OutfitDetailsResponse) : null;
 
-  if (!v3Data && !v1Data) {
+  if (!v4Data && !v3Data && !v1Data) {
     throw new Error(`Failed to fetch outfit details for outfit #${outfitId}`);
   }
 
-  const base = v3Data ?? v1Data;
+  const base = v3Data ?? v1Data ?? v4Data?.outfitModel;
   if (!base) {
     throw new Error(`Failed to fetch outfit details for outfit #${outfitId}`);
   }
-  const rawAssets = v3Data?.assets || v1Data?.assets || [];
+  const rawAssets =
+    v3Data?.assets ||
+    v1Data?.assets ||
+    (v4Data?.outfitModel?.assets as OutfitDetailsResponse["assets"]) ||
+    [];
   const assets: RobloxAsset[] = [];
   for (const asset of rawAssets) {
     if (typeof asset !== "object" || asset === null) continue;
@@ -462,6 +545,24 @@ export async function getOutfitDetails(
       name: rec.name || `Asset ${rec.id}`,
       assetType: rec.assetType || { id: 0, name: "Asset" },
       ...(rec.meta ? { meta: rec.meta } : {}),
+    });
+  }
+
+  // Also include background asset from v4 outfitConfigurations if present
+  const bgFromV4 = v4Data?.outfitConfigurations?.background?.backgroundAsset;
+  if (
+    bgFromV4 &&
+    typeof bgFromV4.id === "number" &&
+    !assets.some((a) => a.id === bgFromV4.id)
+  ) {
+    assets.push({
+      id: bgFromV4.id,
+      name: bgFromV4.name || `Background ${bgFromV4.id}`,
+      assetType: {
+        id: bgFromV4.assetType?.id || 92,
+        name: bgFromV4.assetType?.name || "AvatarBackground",
+      },
+      isOwned: true,
     });
   }
 
@@ -511,14 +612,38 @@ export async function getOutfitDetails(
     bodyColor3s: v3Data?.bodyColor3s,
   });
 
+  let background: RobloxOutfitDetail["background"] | undefined;
+  const backgroundAsset =
+    (bgFromV4 && typeof bgFromV4.id === "number" ? bgFromV4 : undefined) ||
+    assets.find(isAvatarBackgroundAsset);
+
+  if (backgroundAsset && typeof backgroundAsset.id === "number") {
+    const bgId = backgroundAsset.id;
+    const bgName = backgroundAsset.name;
+    try {
+      const thumbMap = await getAssetThumbnails([bgId]);
+      const rawThumb = thumbMap[bgId];
+      background = {
+        id: bgId,
+        name: bgName,
+        imageUrl: rawThumb ? hdThumbnailUrl(rawThumb) : undefined,
+      };
+    } catch {
+      background = {
+        id: bgId,
+        name: bgName,
+      };
+    }
+  }
+
   return {
-    id: base.id ?? outfitId,
+    id: typeof base.id === "number" ? base.id : Number(base.id) || outfitId,
     name: base.name ?? `Outfit #${outfitId}`,
     assets,
     missingAssetIds: missingAssetIds.length > 0 ? missingAssetIds : undefined,
     bodyColors,
     bodyColor3s,
-    scale: base.scale || {
+    scale: (base.scale as RobloxOutfitDetail["scale"]) || {
       height: 1,
       width: 1,
       head: 1,
@@ -526,8 +651,9 @@ export async function getOutfitDetails(
       proportion: 0,
       bodyType: 0,
     },
-    playerAvatarType: base.playerAvatarType || "R15",
+    playerAvatarType: (base.playerAvatarType as RobloxOutfitDetail["playerAvatarType"]) || "R15",
     isEditable: base.isEditable,
+    background,
   };
 }
 

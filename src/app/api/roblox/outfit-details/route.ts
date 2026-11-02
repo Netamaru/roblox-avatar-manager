@@ -1,18 +1,21 @@
 import { getErrorMessage } from "@/lib/error-message";
-import { getOutfitDetails } from "@/lib/roblox-server";
+import { cleanCookie, getOutfitDetails } from "@/lib/roblox-server";
 import { RobloxOutfitDetail } from "@/types/roblox";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const cookie = body.cookie;
-    const outfitId = body.outfitId;
-    const outfitIds = body.outfitIds;
-    const userId = body.userId ? Number(body.userId) : undefined;
+    const body = await req.json().catch(() => ({}));
+    const cookie = cleanCookie(body?.cookie);
+    const outfitId = body?.outfitId;
+    const outfitIds = body?.outfitIds;
+    const userId = body?.userId ? Number(body.userId) : undefined;
 
     if (!cookie) {
-      return NextResponse.json({ error: ".ROBLOSECURITY cookie is required." }, { status: 400 });
+      return NextResponse.json(
+        { error: ".ROBLOSECURITY cookie is required (or configure cookie in .env)." },
+        { status: 400 }
+      );
     }
 
     if (outfitId) {
