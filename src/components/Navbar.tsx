@@ -131,7 +131,7 @@ export default function Navbar({
                   </div>
                 )}
                 <span className="text-sm font-medium text-zinc-200 max-w-[120px] truncate">
-                  {user.name}
+                  {user.displayName}
                 </span>
               </div>
               <button

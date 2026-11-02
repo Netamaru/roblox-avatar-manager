@@ -9,6 +9,7 @@ import {
   ChevronsDown,
   ChevronsUp,
   ChevronUp,
+  Download,
   Eye,
   EyeOff,
   FileCode,
@@ -34,6 +35,7 @@ interface OutfitCardProps {
   onInspect: (outfit: ArrangedOutfit) => void;
   onToggleExclude: (id: number) => void;
   onPatch?: (outfit: ArrangedOutfit) => void;
+  onExport?: (outfit: ArrangedOutfit) => void;
   onDelete: (outfit: ArrangedOutfit) => void;
   isFetchingDetails?: boolean;
   onDragStart: (e: React.DragEvent, id: number) => void;
@@ -57,6 +59,7 @@ export default function OutfitCard({
   onInspect,
   onToggleExclude,
   onPatch,
+  onExport,
   onDelete,
   isFetchingDetails = false,
   onDragStart,
@@ -289,6 +292,17 @@ export default function OutfitCard({
           >
             <Eye className="w-4 h-4" />
           </button>
+          {onExport && (
+            <button
+              type="button"
+              draggable={false}
+              onClick={() => onExport(outfit)}
+              className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition cursor-pointer"
+              title="Export this avatar as JSON"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          )}
           <button
             type="button"
             draggable={false}
@@ -504,10 +518,22 @@ export default function OutfitCard({
               draggable={false}
               onClick={() => onPatch(outfit)}
               className="w-full max-w-[125px] py-1.5 text-xs font-semibold text-sky-300 bg-sky-950/90 hover:bg-sky-900 rounded-lg border border-sky-700/80 shadow-md transition flex items-center justify-center gap-1 text-center cursor-pointer"
-              title="Update avatar from JSON"
+              title="Edit avatar name, skin colors, and proportions"
             >
               <FileCode className="w-3.5 h-3.5 text-sky-400" />
               <span>Edit</span>
+            </button>
+          )}
+          {onExport && (
+            <button
+              type="button"
+              draggable={false}
+              onClick={() => onExport(outfit)}
+              className="w-full max-w-[125px] py-1.5 text-xs font-semibold text-zinc-200 bg-zinc-800/90 hover:bg-zinc-700 rounded-lg border border-zinc-700 shadow-md transition flex items-center justify-center gap-1 text-center cursor-pointer"
+              title="Export this avatar as JSON"
+            >
+              <Download className="w-3.5 h-3.5 text-zinc-400" />
+              <span>Export</span>
             </button>
           )}
           <button

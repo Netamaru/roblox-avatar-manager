@@ -1,12 +1,18 @@
 "use client";
 
+import PulseSkeleton from "@/components/PulseSkeleton";
 import { getErrorMessage } from "@/lib/error-message";
 import {
   ParsedOutfitCandidate,
   parseOutfitCandidates,
 } from "@/lib/outfit-json";
-import PulseSkeleton from "@/components/PulseSkeleton";
-import { extractOutfitColors, formatCssHex } from "@/lib/roblox-colors";
+import {
+  ROBLOX_BRICK_COLORS,
+  cleanHex,
+  extractOutfitColors,
+  formatCssHex,
+  normalizeBodyColors,
+} from "@/lib/roblox-colors";
 import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
 import {
   ArrangedOutfit,
@@ -17,6 +23,7 @@ import {
 import {
   AlertCircle,
   Check,
+  ChevronDown,
   Clipboard,
   FileCode,
   Info,
@@ -40,6 +47,98 @@ interface PatchOutfitModalProps {
   onOutfitPatched: (updatedOutfit: ArrangedOutfit) => void;
 }
 
+type BodyColor3Key =
+  | "headColor3"
+  | "torsoColor3"
+  | "leftArmColor3"
+  | "rightArmColor3"
+  | "leftLegColor3"
+  | "rightLegColor3";
+
+type ScaleKey = keyof RobloxScale;
+
+const DEFAULT_SCALE: RobloxScale = {
+  height: 1,
+  width: 1,
+  head: 1,
+  depth: 1,
+  proportion: 0,
+  bodyType: 0,
+};
+
+const DEFAULT_COLOR3S: Record<BodyColor3Key, string> = {
+  headColor3: "eab892",
+  torsoColor3: "eab892",
+  leftArmColor3: "eab892",
+  rightArmColor3: "eab892",
+  leftLegColor3: "eab892",
+  rightLegColor3: "eab892",
+};
+
+const BODY_PARTS: { key: BodyColor3Key; label: string }[] = [
+  { key: "headColor3", label: "Head" },
+  { key: "torsoColor3", label: "Torso" },
+  { key: "leftArmColor3", label: "L. Arm" },
+  { key: "rightArmColor3", label: "R. Arm" },
+  { key: "leftLegColor3", label: "L. Leg" },
+  { key: "rightLegColor3", label: "R. Leg" },
+];
+
+const SCALE_FIELDS: {
+  key: ScaleKey;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+}[] = [
+  { key: "height", label: "Height", min: 0.9, max: 1.05, step: 0.01 },
+  { key: "width", label: "Width", min: 0.7, max: 1, step: 0.01 },
+  { key: "head", label: "Head", min: 0.95, max: 1, step: 0.01 },
+  { key: "depth", label: "Depth", min: 0.7, max: 1, step: 0.01 },
+  { key: "proportion", label: "Proportion", min: 0, max: 1, step: 0.01 },
+  { key: "bodyType", label: "Body Type", min: 0, max: 1, step: 0.01 },
+];
+
+const QUICK_BRICK_IDS = [
+  125, 18, 5, 12, 36, 1030, 192, 217, 26, 1, 194, 21, 23, 37, 24, 104,
+];
+
+function clampScale(key: ScaleKey, value: number): number {
+  const field = SCALE_FIELDS.find((f) => f.key === key);
+  if (!field) return value;
+  return Math.min(field.max, Math.max(field.min, value));
+}
+
+function scaleFromCandidate(scale?: RobloxScale | null): RobloxScale {
+  const base = scale || DEFAULT_SCALE;
+  return {
+    height: clampScale("height", base.height ?? 1),
+    width: clampScale("width", base.width ?? 1),
+    head: clampScale("head", base.head ?? 1),
+    depth: clampScale("depth", base.depth ?? 1),
+    proportion: clampScale("proportion", base.proportion ?? 0),
+    bodyType: clampScale("bodyType", base.bodyType ?? 0),
+  };
+}
+
+function color3sFromSource(
+  source?: Parameters<typeof extractOutfitColors>[0],
+): Record<BodyColor3Key, string> {
+  const colors = extractOutfitColors(source);
+  return {
+    headColor3: colors.bodyColor3s.headColor3 || DEFAULT_COLOR3S.headColor3,
+    torsoColor3: colors.bodyColor3s.torsoColor3 || DEFAULT_COLOR3S.torsoColor3,
+    leftArmColor3:
+      colors.bodyColor3s.leftArmColor3 || DEFAULT_COLOR3S.leftArmColor3,
+    rightArmColor3:
+      colors.bodyColor3s.rightArmColor3 || DEFAULT_COLOR3S.rightArmColor3,
+    leftLegColor3:
+      colors.bodyColor3s.leftLegColor3 || DEFAULT_COLOR3S.leftLegColor3,
+    rightLegColor3:
+      colors.bodyColor3s.rightLegColor3 || DEFAULT_COLOR3S.rightLegColor3,
+  };
+}
+
 export default function PatchOutfitModal({
   isOpen,
   onClose,
@@ -49,14 +148,27 @@ export default function PatchOutfitModal({
   onOutfitPatched,
 }: PatchOutfitModalProps) {
   const [jsonText, setJsonText] = useState("");
+  const [showAdvancedJson, setShowAdvancedJson] = useState(false);
   const [customName, setCustomName] = useState(outfit?.name || "");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [palettePart, setPalettePart] = useState<BodyColor3Key | null>(null);
   const [detailsLoadSettled, setDetailsLoadSettled] = useState(
     Boolean(outfit?.details),
   );
 
   const [currentDetails, setCurrentDetails] =
     useState<RobloxOutfitDetail | null>(outfit?.details || null);
+
+  // Parent remounts this modal with key={outfit.id}, so initial state is enough
+  const [editedColor3s, setEditedColor3s] = useState<
+    Record<BodyColor3Key, string>
+  >(() => color3sFromSource(outfit?.details || outfit));
+  const [editedScale, setEditedScale] = useState<RobloxScale>(() =>
+    scaleFromCandidate(outfit?.details?.scale),
+  );
+  const [editedRig, setEditedRig] = useState<"R6" | "R15">(() =>
+    outfit?.details?.playerAvatarType === "R6" ? "R6" : "R15",
+  );
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -88,6 +200,11 @@ export default function PatchOutfitModal({
       .then((data) => {
         if (!cancelled && data.details) {
           setCurrentDetails(data.details);
+          setEditedColor3s(color3sFromSource(data.details));
+          setEditedScale(scaleFromCandidate(data.details.scale));
+          setEditedRig(
+            data.details.playerAvatarType === "R6" ? "R6" : "R15",
+          );
         }
       })
       .catch((err) => {
@@ -105,73 +222,60 @@ export default function PatchOutfitModal({
   const parsedJson = useMemo(() => parseOutfitCandidates(jsonText), [jsonText]);
   const candidates = parsedJson.candidates;
   const parseError = parsedJson.error;
+  const isJsonProvided = jsonText.trim().length > 0;
+
+  const applyAppearanceFromCandidate = (candidate: ParsedOutfitCandidate) => {
+    if (candidate.name) setCustomName(candidate.name);
+    setEditedColor3s(color3sFromSource(candidate));
+    setEditedScale(scaleFromCandidate(candidate.scale));
+    setEditedRig(candidate.playerAvatarType === "R6" ? "R6" : "R15");
+  };
 
   const applyJsonText = (text: string) => {
     setJsonText(text);
     const parsed = parseOutfitCandidates(text);
-    if (parsed.candidates[0]?.name) {
-      setCustomName(parsed.candidates[0].name);
-    }
     setSelectedIndex(0);
+    if (parsed.candidates[0]) {
+      applyAppearanceFromCandidate(parsed.candidates[0]);
+    }
   };
 
-  // Current outfit candidate (used if JSON is empty, e.g. for renaming only)
-  const currentCandidate = useMemo<ParsedOutfitCandidate>(() => {
+  const baseAssetsCandidate = useMemo<ParsedOutfitCandidate>(() => {
     const details = currentDetails || outfit?.details;
-    const colors = extractOutfitColors(details || outfit);
     const rawAssets = details?.assets || [];
     return {
       id: outfit?.id,
-      name: customName.trim() || outfit?.name || "Avatar",
+      name: outfit?.name,
       thumbnailUrl: outfit?.thumbnailUrl,
-      playerAvatarType: details?.playerAvatarType || "R15",
-      bodyColors: colors.bodyColors,
-      bodyColor3s: colors.bodyColor3s,
-      scale: details?.scale || {
-        height: 1,
-        width: 1,
-        head: 1,
-        depth: 1,
-        proportion: 0,
-        bodyType: 0,
-      },
       assets: rawAssets,
       assetIds: rawAssets.map((asset) => asset.id),
     };
-  }, [outfit, currentDetails, customName]);
+  }, [outfit, currentDetails]);
 
-  const isJsonProvided = jsonText.trim().length > 0;
+  const jsonCandidate =
+    isJsonProvided && candidates.length > 0
+      ? candidates[selectedIndex] || candidates[0]
+      : null;
 
-  // Active candidate: uses parsed candidate if JSON is provided, otherwise falls back to current outfit
-  const activeCandidate = useMemo<ParsedOutfitCandidate>(() => {
-    if (isJsonProvided && candidates.length > 0) {
-      return candidates[selectedIndex] || candidates[0];
-    }
-    return currentCandidate;
-  }, [isJsonProvided, candidates, selectedIndex, currentCandidate]);
-
-  // Extract resolved colors for preview and payload
-  const resolvedColors = useMemo(() => {
-    if (!activeCandidate) return null;
-    return extractOutfitColors(activeCandidate);
-  }, [activeCandidate]);
+  const assetSource = jsonCandidate || baseAssetsCandidate;
 
   const resolvedAssetsCount = useMemo(() => {
-    if (!activeCandidate) return 0;
-    if (
-      Array.isArray(activeCandidate.assets) &&
-      activeCandidate.assets.length > 0
-    ) {
-      return activeCandidate.assets.length;
+    if (Array.isArray(assetSource.assets) && assetSource.assets.length > 0) {
+      return assetSource.assets.length;
     }
     if (
-      Array.isArray(activeCandidate.assetIds) &&
-      activeCandidate.assetIds.length > 0
+      Array.isArray(assetSource.assetIds) &&
+      assetSource.assetIds.length > 0
     ) {
-      return activeCandidate.assetIds.length;
+      return assetSource.assetIds.length;
     }
     return 0;
-  }, [activeCandidate]);
+  }, [assetSource]);
+
+  const resolvedBodyColors = useMemo(
+    () => normalizeBodyColors(null, editedColor3s),
+    [editedColor3s],
+  );
 
   if (!isOpen || !outfit) return null;
 
@@ -186,6 +290,7 @@ export default function PatchOutfitModal({
       const text = event.target?.result as string;
       if (text) {
         applyJsonText(text);
+        setShowAdvancedJson(true);
       }
     };
     reader.readAsText(file);
@@ -196,6 +301,7 @@ export default function PatchOutfitModal({
       const text = await navigator.clipboard.readText();
       if (text) {
         applyJsonText(text);
+        setShowAdvancedJson(true);
       }
     } catch {
       // ignore clipboard permission error
@@ -203,36 +309,61 @@ export default function PatchOutfitModal({
   };
 
   const handleResetOriginalName = () => {
-    if (outfit?.name) {
-      setCustomName(outfit.name);
-    }
+    if (outfit?.name) setCustomName(outfit.name);
+  };
+
+  const handleResetAppearance = () => {
+    const details = currentDetails || outfit.details;
+    setEditedColor3s(color3sFromSource(details || outfit));
+    setEditedScale(scaleFromCandidate(details?.scale));
+    setEditedRig(details?.playerAvatarType === "R6" ? "R6" : "R15");
+  };
+
+  const updateColorPart = (key: BodyColor3Key, rawHex: string) => {
+    setEditedColor3s((prev) => ({
+      ...prev,
+      [key]: cleanHex(rawHex),
+    }));
+  };
+
+  const applyColorToAll = (hex: string) => {
+    const cleaned = cleanHex(hex);
+    setEditedColor3s({
+      headColor3: cleaned,
+      torsoColor3: cleaned,
+      leftArmColor3: cleaned,
+      rightArmColor3: cleaned,
+      leftLegColor3: cleaned,
+      rightLegColor3: cleaned,
+    });
+  };
+
+  const updateScale = (key: ScaleKey, raw: number) => {
+    setEditedScale((prev) => ({
+      ...prev,
+      [key]: clampScale(key, raw),
+    }));
   };
 
   const handleApplyPatch = async () => {
-    if (!activeCandidate || !resolvedColors) return;
-
     setIsSubmitting(true);
     setSubmitError(null);
     setSubmitSuccess(null);
 
     try {
       const finalName =
-        customName.trim() || activeCandidate.name || outfit.name || "Avatar";
+        customName.trim() ||
+        jsonCandidate?.name ||
+        outfit.name ||
+        "Avatar";
       const payload = {
         name: finalName,
-        playerAvatarType: activeCandidate.playerAvatarType || "R15",
-        scale: (activeCandidate.scale || {
-          height: 1,
-          width: 1,
-          head: 1,
-          depth: 1,
-          proportion: 0,
-          bodyType: 0,
-        }) as RobloxScale,
-        assets: activeCandidate.assets,
-        assetIds: activeCandidate.assetIds,
-        bodyColors: resolvedColors.bodyColors,
-        bodyColor3s: resolvedColors.bodyColor3s,
+        playerAvatarType: editedRig,
+        scale: editedScale,
+        assets: assetSource.assets,
+        assetIds: assetSource.assetIds,
+        bodyColors: resolvedBodyColors,
+        bodyColor3s: editedColor3s,
       };
 
       const res = await fetch("/api/roblox/patch-outfit", {
@@ -255,22 +386,19 @@ export default function PatchOutfitModal({
       }
 
       setSubmitSuccess(
-        isJsonProvided
-          ? `Outfit #${outfit.id} successfully updated with new appearance!`
-          : `Outfit #${outfit.id} renamed to "${finalName}" on Roblox!`,
+        `Outfit #${outfit.id} successfully updated on Roblox!`,
       );
 
-      // Prepare updated ArrangedOutfit object
       const updatedDetails: RobloxOutfitDetail = json.details || {
         id: outfit.id,
         name: finalName,
         playerAvatarType: payload.playerAvatarType,
-        bodyColors: resolvedColors.bodyColors,
-        bodyColor3s: resolvedColors.bodyColor3s,
+        bodyColors: resolvedBodyColors,
+        bodyColor3s: editedColor3s,
         scale: payload.scale,
         assets:
-          activeCandidate.assets ||
-          (activeCandidate.assetIds || []).map((id) => ({
+          assetSource.assets ||
+          (assetSource.assetIds || []).map((id) => ({
             id,
             name: `Asset ${id}`,
             assetType: { id: 0, name: "Asset" },
@@ -289,7 +417,6 @@ export default function PatchOutfitModal({
 
       onOutfitPatched(updatedArranged);
 
-      // Close modal after brief success feedback
       setTimeout(() => {
         onClose();
       }, 1000);
@@ -312,18 +439,17 @@ export default function PatchOutfitModal({
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-950/80">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-sky-950/60 border border-sky-800/60 flex items-center justify-center text-sky-400">
-              <FileCode className="w-5 h-5" />
+              <Sliders className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <span>Update Specific Avatar</span>
+                <span>Edit Avatar</span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 font-mono text-zinc-300">
                   #{outfit.id}
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Update name or patch appearance directly from JSON on your
-                Roblox account
+                Change name, skin colors, and proportions — or paste JSON
               </p>
             </div>
           </div>
@@ -367,7 +493,13 @@ export default function PatchOutfitModal({
                   {showAppearanceSkeleton ? (
                     <PulseSkeleton className="h-3 w-8 align-middle" />
                   ) : (
-                    <span>{activeCandidate.playerAvatarType}</span>
+                    <span>{editedRig}</span>
+                  )}
+                  <span>•</span>
+                  {showAppearanceSkeleton ? (
+                    <PulseSkeleton className="h-3 w-12 align-middle" />
+                  ) : (
+                    <span>{resolvedAssetsCount} items</span>
                   )}
                   {isLoadingDetails && (
                     <>
@@ -396,9 +528,6 @@ export default function PatchOutfitModal({
                 className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5"
               >
                 <span>Avatar Name</span>
-                <span className="text-zinc-500 font-normal">
-                  (Customizable)
-                </span>
               </label>
               <div className="flex items-center gap-2">
                 {customName !== outfit.name && (
@@ -434,290 +563,318 @@ export default function PatchOutfitModal({
               placeholder="Enter custom outfit name..."
               className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-white text-sm focus:outline-none focus:border-sky-500 transition"
             />
-            <p className="text-[11px] text-zinc-500">
-              Change the name here to rename this avatar on Roblox.
-            </p>
           </div>
 
-          {/* JSON Input Area */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <label className="text-xs font-semibold text-zinc-300">
-                  JSON Data
-                </label>
-                <span className="text-[11px] text-zinc-500 font-normal">
-                  (Optional — leave blank to only rename)
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
+          {/* Rig toggle */}
+          <div className="space-y-1.5">
+            <span className="text-xs font-semibold text-zinc-300">Rig Type</span>
+            <div className="flex gap-2">
+              {(["R15", "R6"] as const).map((rig) => (
                 <button
+                  key={rig}
                   type="button"
-                  onClick={handlePasteClipboard}
-                  className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white bg-zinc-900 hover:bg-zinc-800 px-2 py-1 rounded-md border border-zinc-800 transition"
-                  title="Paste from clipboard"
+                  disabled={showAppearanceSkeleton}
+                  onClick={() => setEditedRig(rig)}
+                  className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition ${
+                    editedRig === rig
+                      ? "bg-sky-950/60 border-sky-600 text-sky-200"
+                      : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                  }`}
                 >
-                  <Clipboard className="w-3.5 h-3.5" />
-                  <span>Paste</span>
+                  {rig}
                 </button>
-                <label className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white bg-zinc-900 hover:bg-zinc-800 px-2 py-1 rounded-md border border-zinc-800 transition cursor-pointer">
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Upload .json</span>
-                  <input
-                    type="file"
-                    accept=".json,application/json"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </label>
-                {jsonText && (
-                  <button
-                    type="button"
-                    onClick={() => setJsonText("")}
-                    className="text-xs text-zinc-500 hover:text-zinc-300 px-1.5 py-1"
-                  >
-                    Clear
-                  </button>
-                )}
+              ))}
+            </div>
+          </div>
+
+          {/* Skin Colors Editor */}
+          <div className="p-4 bg-zinc-900/70 border border-zinc-800 rounded-xl space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-200">
+                <Palette className="w-3.5 h-3.5 text-sky-400" />
+                <span>Skin Colors</span>
               </div>
+              <button
+                type="button"
+                onClick={handleResetAppearance}
+                disabled={showAppearanceSkeleton}
+                className="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition disabled:opacity-40"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Reset look
+              </button>
             </div>
 
-            <textarea
-              rows={4}
-              value={jsonText}
-              onChange={(e) => applyJsonText(e.target.value)}
-              placeholder="Optional: Paste outfit JSON here to replace appearance, or leave empty to keep current look and only rename..."
-              className="w-full p-3 bg-zinc-900/90 border border-zinc-800 rounded-xl font-mono text-xs text-zinc-200 focus:outline-none focus:border-sky-500 transition resize-y"
-            />
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {BODY_PARTS.map((part) => {
+                const hex = editedColor3s[part.key];
+                return (
+                  <div
+                    key={part.key}
+                    className="p-2.5 bg-zinc-950/60 border border-zinc-800/80 rounded-lg space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[11px] font-medium text-zinc-400">
+                        {part.label}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={showAppearanceSkeleton}
+                        onClick={() =>
+                          setPalettePart(
+                            palettePart === part.key ? null : part.key,
+                          )
+                        }
+                        className="text-[10px] text-sky-400 hover:text-sky-300 disabled:opacity-40"
+                        title="BrickColor quick pick"
+                      >
+                        Palette
+                      </button>
+                    </div>
+                    {showAppearanceSkeleton ? (
+                      <PulseSkeleton className="h-8 w-full rounded-md" />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={formatCssHex(hex)}
+                          onChange={(e) =>
+                            updateColorPart(part.key, e.target.value)
+                          }
+                          className="w-8 h-8 rounded-md border border-zinc-700 bg-transparent cursor-pointer shrink-0"
+                          title={`Pick ${part.label} color`}
+                        />
+                        <input
+                          type="text"
+                          value={`#${hex}`}
+                          onChange={(e) =>
+                            updateColorPart(part.key, e.target.value)
+                          }
+                          className="flex-1 min-w-0 px-2 py-1.5 bg-zinc-900 border border-zinc-800 rounded-md font-mono text-[11px] text-zinc-200 focus:outline-none focus:border-sky-500 uppercase"
+                          spellCheck={false}
+                        />
+                      </div>
+                    )}
+                    {palettePart === part.key && (
+                      <div className="space-y-1.5 pt-1 border-t border-zinc-800/80">
+                        <div className="flex flex-wrap gap-1">
+                          {QUICK_BRICK_IDS.map((id) => {
+                            const entry = ROBLOX_BRICK_COLORS[id];
+                            if (!entry) return null;
+                            return (
+                              <button
+                                key={id}
+                                type="button"
+                                title={`${entry.name} (#${id})`}
+                                onClick={() => {
+                                  updateColorPart(part.key, entry.hex);
+                                  setPalettePart(null);
+                                }}
+                                className="w-5 h-5 rounded border border-white/10 hover:scale-110 transition"
+                                style={{ backgroundColor: entry.hex }}
+                              />
+                            );
+                          })}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => applyColorToAll(hex)}
+                          className="text-[10px] text-zinc-400 hover:text-zinc-200"
+                        >
+                          Apply this color to all parts
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
-            {parseError && (
-              <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-950/40 border border-red-500/30 text-red-300 text-xs">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-                <span>{parseError}</span>
+          {/* Proportions Editor */}
+          <div className="p-4 bg-zinc-900/70 border border-zinc-800 rounded-xl space-y-3">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-200">
+              <Sliders className="w-3.5 h-3.5 text-sky-400" />
+              <span>Avatar Proportions</span>
+            </div>
+            <div className="space-y-3">
+              {SCALE_FIELDS.map((field) => {
+                const value = editedScale[field.key];
+                return (
+                  <div key={field.key} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-400 font-medium">
+                        {field.label}
+                      </span>
+                      {showAppearanceSkeleton ? (
+                        <PulseSkeleton className="h-3 w-10" />
+                      ) : (
+                        <span className="font-mono text-zinc-200">
+                          {Math.round(value * 100)}%
+                        </span>
+                      )}
+                    </div>
+                    {showAppearanceSkeleton ? (
+                      <PulseSkeleton className="h-2 w-full rounded-full" />
+                    ) : (
+                      <input
+                        type="range"
+                        min={field.min}
+                        max={field.max}
+                        step={field.step}
+                        value={value}
+                        onChange={(e) =>
+                          updateScale(field.key, Number(e.target.value))
+                        }
+                        className="w-full accent-sky-500 cursor-pointer"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Advanced JSON (collapsible) */}
+          <div className="border border-zinc-800 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedJson((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-zinc-900/50 hover:bg-zinc-900 transition text-left"
+            >
+              <div className="flex items-center gap-2">
+                <FileCode className="w-4 h-4 text-zinc-400" />
+                <span className="text-xs font-semibold text-zinc-300">
+                  Advanced JSON
+                </span>
+                <span className="text-[11px] text-zinc-500">
+                  Optional — replace equipped items via paste/upload
+                </span>
+              </div>
+              <ChevronDown
+                className={`w-4 h-4 text-zinc-500 transition ${
+                  showAdvancedJson ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+
+            {showAdvancedJson && (
+              <div className="p-4 space-y-3 border-t border-zinc-800">
+                <div className="flex items-center justify-end gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handlePasteClipboard}
+                    className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white bg-zinc-900 hover:bg-zinc-800 px-2 py-1 rounded-md border border-zinc-800 transition"
+                    title="Paste from clipboard"
+                  >
+                    <Clipboard className="w-3.5 h-3.5" />
+                    <span>Paste</span>
+                  </button>
+                  <label className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white bg-zinc-900 hover:bg-zinc-800 px-2 py-1 rounded-md border border-zinc-800 transition cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload .json</span>
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                  {jsonText && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setJsonText("");
+                        handleResetAppearance();
+                      }}
+                      className="text-xs text-zinc-500 hover:text-zinc-300 px-1.5 py-1"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                <textarea
+                  rows={4}
+                  value={jsonText}
+                  onChange={(e) => applyJsonText(e.target.value)}
+                  placeholder="Paste outfit JSON to replace equipped items (colors & scales sync into the editors above)..."
+                  className="w-full p-3 bg-zinc-900/90 border border-zinc-800 rounded-xl font-mono text-xs text-zinc-200 focus:outline-none focus:border-sky-500 transition resize-y"
+                />
+
+                {parseError && (
+                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-950/40 border border-red-500/30 text-red-300 text-xs">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                    <span>{parseError}</span>
+                  </div>
+                )}
+
+                {candidates.length > 1 && (
+                  <div className="space-y-2 p-3 bg-zinc-900/40 border border-zinc-800 rounded-xl">
+                    <label className="text-xs font-semibold text-zinc-300 flex items-center justify-between">
+                      <span>
+                        Select Outfit from JSON ({candidates.length} found)
+                      </span>
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1">
+                      {candidates.map((cand, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setSelectedIndex(idx);
+                            applyAppearanceFromCandidate(cand);
+                          }}
+                          className={`flex items-center gap-2.5 p-2 rounded-lg border text-left transition ${
+                            selectedIndex === idx
+                              ? "bg-sky-950/40 border-sky-500/60 ring-1 ring-sky-500/40 text-white"
+                              : "bg-zinc-900/60 border-zinc-800 text-zinc-300 hover:border-zinc-700"
+                          }`}
+                        >
+                          <div className="relative w-8 h-8 rounded bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0 flex items-center justify-center">
+                            {cand.thumbnailUrl ? (
+                              <Image
+                                src={hdThumbnailUrl(cand.thumbnailUrl)}
+                                alt={cand.name || "Outfit"}
+                                fill
+                                className="object-contain"
+                                unoptimized
+                              />
+                            ) : (
+                              <User className="w-4 h-4 text-zinc-600" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold truncate">
+                              {cand.name || `Outfit #${idx + 1}`}
+                            </p>
+                            <p className="text-[10px] text-zinc-500 font-mono">
+                              {cand.playerAvatarType || "R15"} •{" "}
+                              {cand.assets?.length ||
+                                cand.assetIds?.length ||
+                                0}{" "}
+                              items
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {isJsonProvided && !parseError && (
+                  <div className="p-2.5 bg-sky-950/30 border border-sky-800/40 rounded-lg text-xs text-sky-200 flex items-start gap-2">
+                    <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                    <p className="leading-relaxed">
+                      JSON loaded: equipped items will come from JSON. Skin
+                      colors and proportions were synced into the editors —
+                      you can still tweak them before saving.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>
-
-          {/* Multiple Candidates Selector from JSON */}
-          {candidates.length > 1 && (
-            <div className="space-y-2 p-3 bg-zinc-900/40 border border-zinc-800 rounded-xl">
-              <label className="text-xs font-semibold text-zinc-300 flex items-center justify-between">
-                <span>Select Outfit from JSON ({candidates.length} found)</span>
-                <span className="text-[11px] text-zinc-500">
-                  Pick which look to apply
-                </span>
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1">
-                {candidates.map((cand, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => {
-                      setSelectedIndex(idx);
-                      if (cand.name) setCustomName(cand.name);
-                    }}
-                    className={`flex items-center gap-2.5 p-2 rounded-lg border text-left transition ${
-                      selectedIndex === idx
-                        ? "bg-sky-950/40 border-sky-500/60 ring-1 ring-sky-500/40 text-white"
-                        : "bg-zinc-900/60 border-zinc-800 text-zinc-300 hover:border-zinc-700"
-                    }`}
-                  >
-                    <div className="relative w-8 h-8 rounded bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0 flex items-center justify-center">
-                      {cand.thumbnailUrl ? (
-                        <Image
-                          src={hdThumbnailUrl(cand.thumbnailUrl)}
-                          alt={cand.name || "Outfit"}
-                          fill
-                          className="object-contain"
-                          unoptimized
-                        />
-                      ) : (
-                        <User className="w-4 h-4 text-zinc-600" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold truncate">
-                        {cand.name || `Outfit #${idx + 1}`}
-                      </p>
-                      <p className="text-[10px] text-zinc-500 font-mono">
-                        {cand.playerAvatarType || "R15"} •{" "}
-                        {cand.assets?.length || cand.assetIds?.length || 0}{" "}
-                        items
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Live Preview Box (Works whether JSON is pasted or current avatar is kept) */}
-          {resolvedColors && (
-            <div className="p-4 bg-zinc-900/70 border border-zinc-800 rounded-xl space-y-3.5">
-              <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2.5">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      isJsonProvided
-                        ? "bg-emerald-400 animate-pulse"
-                        : "bg-sky-400"
-                    }`}
-                  />
-                  <span className="text-xs font-bold text-zinc-200">
-                    {isJsonProvided
-                      ? "Parsed Appearance from JSON"
-                      : "Current Appearance Preserved"}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {showAppearanceSkeleton ? (
-                    <>
-                      <PulseSkeleton className="h-5 w-10 rounded-md" />
-                      <PulseSkeleton className="h-5 w-16 rounded-md" />
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 font-mono text-zinc-300 font-semibold">
-                        {activeCandidate.playerAvatarType}
-                      </span>
-                      <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 font-mono text-zinc-300 font-semibold">
-                        {resolvedAssetsCount} items
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Informational callout when JSON is empty */}
-              {!isJsonProvided && (
-                <div className="p-2.5 bg-sky-950/30 border border-sky-800/40 rounded-lg text-xs text-sky-200 flex items-start gap-2">
-                  <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-                  <p className="leading-relaxed">
-                    JSON is empty: equipped items, skin colors, and scales will
-                    stay identical to the current avatar. Only the name will be
-                    updated to{" "}
-                    <strong className="text-white font-semibold">
-                      &ldquo;{customName.trim() || outfit.name}&rdquo;
-                    </strong>{" "}
-                    on Roblox.
-                  </p>
-                </div>
-              )}
-
-              {/* Skin Colors Preview */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-300">
-                  <Palette className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Skin Colors (Body Colors)</span>
-                </div>
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                  {(showAppearanceSkeleton
-                    ? [
-                        { label: "Head" },
-                        { label: "Torso" },
-                        { label: "L. Arm" },
-                        { label: "R. Arm" },
-                        { label: "L. Leg" },
-                        { label: "R. Leg" },
-                      ]
-                    : [
-                        {
-                          label: "Head",
-                          hex: resolvedColors.bodyColor3s.headColor3,
-                          id: resolvedColors.bodyColors.headColorId,
-                        },
-                        {
-                          label: "Torso",
-                          hex: resolvedColors.bodyColor3s.torsoColor3,
-                          id: resolvedColors.bodyColors.torsoColorId,
-                        },
-                        {
-                          label: "L. Arm",
-                          hex: resolvedColors.bodyColor3s.leftArmColor3,
-                          id: resolvedColors.bodyColors.leftArmColorId,
-                        },
-                        {
-                          label: "R. Arm",
-                          hex: resolvedColors.bodyColor3s.rightArmColor3,
-                          id: resolvedColors.bodyColors.rightArmColorId,
-                        },
-                        {
-                          label: "L. Leg",
-                          hex: resolvedColors.bodyColor3s.leftLegColor3,
-                          id: resolvedColors.bodyColors.leftLegColorId,
-                        },
-                        {
-                          label: "R. Leg",
-                          hex: resolvedColors.bodyColor3s.rightLegColor3,
-                          id: resolvedColors.bodyColors.rightLegColorId,
-                        },
-                      ]
-                  ).map((part) => (
-                    <div
-                      key={part.label}
-                      className="p-2 bg-zinc-950/60 border border-zinc-800/80 rounded-lg flex flex-col items-center gap-1.5 text-center"
-                    >
-                      {showAppearanceSkeleton || !("hex" in part) ? (
-                        <PulseSkeleton className="w-7 h-7 rounded-md" />
-                      ) : (
-                        <div
-                          className="w-7 h-7 rounded-md border border-white/10 shadow-sm shrink-0"
-                          style={{ backgroundColor: formatCssHex(part.hex) }}
-                          title={`Color: #${part.hex} (Brick #${part.id})`}
-                        />
-                      )}
-                      <span className="text-[10px] text-zinc-400 font-medium">
-                        {part.label}
-                      </span>
-                      {showAppearanceSkeleton || !("hex" in part) ? (
-                        <PulseSkeleton className="h-2.5 w-10" />
-                      ) : (
-                        <span className="text-[10px] font-mono text-zinc-300 uppercase">
-                          #{part.hex.slice(0, 6)}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Scale Preview */}
-              {activeCandidate.scale && (
-                <div className="pt-2 border-t border-zinc-800/60">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400 mb-1.5">
-                    <Sliders className="w-3.5 h-3.5 text-zinc-400" />
-                    <span>Avatar Proportions</span>
-                  </div>
-                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 text-center text-xs">
-                    {[
-                      { l: "Height", v: activeCandidate.scale.height },
-                      { l: "Width", v: activeCandidate.scale.width },
-                      { l: "Head", v: activeCandidate.scale.head },
-                      { l: "Depth", v: activeCandidate.scale.depth },
-                      { l: "Proportion", v: activeCandidate.scale.proportion },
-                      { l: "Body Type", v: activeCandidate.scale.bodyType },
-                    ].map((s) => (
-                      <div
-                        key={s.l}
-                        className="bg-zinc-950/40 p-1.5 rounded border border-zinc-800/60"
-                      >
-                        <span className="text-[10px] text-zinc-500 block">
-                          {s.l}
-                        </span>
-                        {showAppearanceSkeleton ? (
-                          <PulseSkeleton className="h-3 w-8 mx-auto mt-0.5" />
-                        ) : (
-                          <span className="font-mono text-xs text-zinc-200">
-                            {s.v != null ? `${Math.round(s.v * 100)}%` : "-"}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Feedback Banners */}
           {submitError && (
@@ -766,16 +923,10 @@ export default function PatchOutfitModal({
             {isSubmitting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Updating on Roblox...</span>
+                <span>Saving to Roblox...</span>
               </>
             ) : (
-              <>
-                <span>
-                  {isJsonProvided
-                    ? "Update Avatar from JSON"
-                    : "Save Name to Roblox"}
-                </span>
-              </>
+              <span>Save to Roblox</span>
             )}
           </button>
         </div>

@@ -13,6 +13,7 @@ import WorkspaceSkeleton from "@/components/WorkspaceSkeleton";
 import OutfitDetailModal from "@/components/OutfitDetailModal";
 import PatchOutfitModal from "@/components/PatchOutfitModal";
 import { extractOutfitColors } from "@/lib/roblox-colors";
+import { downloadOutfitExportJson } from "@/lib/outfit-json";
 import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
 import { getErrorMessage } from "@/lib/error-message";
 import { ArrangedOutfit, RobloxUser } from "@/types/roblox";
@@ -401,6 +402,10 @@ export default function HomePage() {
   const handleReloadFromRoblox = () => {
     if (!cookie) return;
     handleAuthWithCookie(cookie, false);
+  };
+
+  const handleExportOutfit = (outfit: ArrangedOutfit) => {
+    downloadOutfitExportJson(outfit, user);
   };
 
   const handleDownloadBackup = () => {
@@ -856,6 +861,7 @@ export default function HomePage() {
                       onInspect={(o) => setInspectingOutfit(o)}
                       onToggleExclude={handleToggleExclude}
                       onPatch={(o) => setPatchingOutfit(o)}
+                      onExport={handleExportOutfit}
                       onDelete={(o) => setDeletingOutfit(o)}
                       isFetchingDetails={isFetchingDetails}
                       onDragStart={handleDragStart}
@@ -905,6 +911,7 @@ export default function HomePage() {
                       onInspect={(o) => setInspectingOutfit(o)}
                       onToggleExclude={handleToggleExclude}
                       onPatch={(o) => setPatchingOutfit(o)}
+                      onExport={handleExportOutfit}
                       onDelete={(o) => setDeletingOutfit(o)}
                       isFetchingDetails={isFetchingDetails}
                       onDragStart={handleDragStart}
@@ -999,8 +1006,10 @@ export default function HomePage() {
         <OutfitDetailModal
           outfit={activeInspectingOutfit}
           cookie={cookie}
+          user={user}
           isFetchingDetails={isFetchingDetails}
           onClose={() => setInspectingOutfit(null)}
+          onExport={handleExportOutfit}
           onPatch={(o) => {
             setInspectingOutfit(null);
             setPatchingOutfit(o);

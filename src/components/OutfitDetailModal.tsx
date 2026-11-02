@@ -1,9 +1,13 @@
 "use client";
 
 import PulseSkeleton from "@/components/PulseSkeleton";
+import {
+  downloadOutfitExportJson,
+  outfitExportFilename,
+} from "@/lib/outfit-json";
 import { formatCssHex } from "@/lib/roblox-colors";
 import { hdThumbnailUrl } from "@/lib/roblox-thumbnails";
-import { ArrangedOutfit } from "@/types/roblox";
+import { ArrangedOutfit, RobloxUser } from "@/types/roblox";
 import {
   AlertTriangle,
   Check,
@@ -26,8 +30,10 @@ import { useEffect, useMemo, useState } from "react";
 interface OutfitDetailModalProps {
   outfit: ArrangedOutfit | null;
   cookie: string;
+  user?: RobloxUser | null;
   onClose: () => void;
   onPatch?: (outfit: ArrangedOutfit) => void;
+  onExport?: (outfit: ArrangedOutfit) => void;
   isFetchingDetails?: boolean;
 }
 
@@ -200,8 +206,10 @@ function CatalogAssetThumb({
 export default function OutfitDetailModal({
   outfit,
   cookie,
+  user = null,
   onClose,
   onPatch,
+  onExport,
   isFetchingDetails = false,
 }: OutfitDetailModalProps) {
   const [activeTab, setActiveTab] = useState<"items" | "body" | "json">(
@@ -284,15 +292,11 @@ export default function OutfitDetailModal({
   };
 
   const handleDownloadJson = () => {
-    const blob = new Blob([jsonString], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `outfit-${outfit.id}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    if (onExport) {
+      onExport(outfit);
+      return;
+    }
+    downloadOutfitExportJson(outfit, user);
   };
 
   const bodyParts = [
@@ -380,14 +384,22 @@ export default function OutfitDetailModal({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownloadJson}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-zinc-200 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded-lg transition cursor-pointer"
+              title={`Export ${outfitExportFilename(outfit)}`}
+            >
+              <Download className="w-3.5 h-3.5 text-zinc-400" />
+              <span>Export</span>
+            </button>
             {onPatch && (
               <button
                 onClick={() => onPatch(outfit)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-sky-300 bg-sky-950/70 hover:bg-sky-900 border border-sky-800/80 rounded-lg transition cursor-pointer"
-                title="Update this avatar from JSON"
+                title="Edit avatar name, skin colors, and proportions"
               >
                 <FileCode className="w-3.5 h-3.5 text-sky-400" />
-                <span>Patch from JSON</span>
+                <span>Edit Avatar</span>
               </button>
             )}
             <button
@@ -835,11 +847,11 @@ export default function OutfitDetailModal({
                           <span>Wrap: {isWordWrap ? "ON" : "OFF"}</span>
                         </button>
 
-                        {/* Export JSON */}
+                        {/* Export portable JSON */}
                         <button
                           onClick={handleDownloadJson}
                           className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:text-white bg-zinc-850 hover:bg-zinc-800 border border-zinc-750 rounded-lg transition cursor-pointer"
-                          title={`Download outfit-${outfit.id}.json`}
+                          title={`Download ${outfitExportFilename(outfit)}`}
                         >
                           <Download className="w-3.5 h-3.5 text-zinc-400" />
                           <span className="hidden sm:inline">Export</span>

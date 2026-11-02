@@ -33,7 +33,7 @@ export default function ExportImportModal({
   const [importJsonText, setImportJsonText] = useState("");
   const [importPreview, setImportPreview] = useState<ArrangedOutfit[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
-  const [replaceExisting, setReplaceExisting] = useState(true);
+  const [replaceExisting, setReplaceExisting] = useState(false);
   const [isFetchingDetails, setIsFetchingDetails] = useState(false);
 
   const missingDetailsCount = outfits.filter((o) => !o.details).length;
@@ -239,8 +239,10 @@ export default function ExportImportModal({
                   className="hidden"
                 />
                 <Upload className="w-6 h-6 text-zinc-400 mx-auto mb-2" />
-                <span className="text-zinc-200 font-semibold text-sm block">Choose backup JSON file</span>
-                <span className="text-xs text-zinc-500 mt-0.5 block">Supports Roblox Avatar Manager backup format</span>
+                <span className="text-zinc-200 font-semibold text-sm block">Choose JSON file</span>
+                <span className="text-xs text-zinc-500 mt-0.5 block">
+                  Full backup or a single exported avatar — appends by default
+                </span>
               </label>
 
               {/* Paste textarea */}
@@ -253,7 +255,7 @@ export default function ExportImportModal({
                     parseAndPreviewJson(e.target.value);
                   }}
                   rows={3}
-                  placeholder='{"outfits": [...]}'
+                  placeholder='{"outfits": [...]} or a single avatar export'
                   className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl font-mono text-xs text-zinc-200 focus:outline-none focus:border-zinc-500 resize-none"
                 />
               </div>
@@ -265,10 +267,19 @@ export default function ExportImportModal({
               )}
 
               {importPreview && (
-                <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-2">
-                  <span className="font-semibold text-sm text-zinc-100">
-                    Found {importPreview.length} outfits in file
+                <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-2.5">
+                  <span className="font-semibold text-sm text-zinc-100 block">
+                    {importPreview.length === 1
+                      ? `Ready to add “${importPreview[0].name}” to workspace`
+                      : `Found ${importPreview.length} avatars in file`}
                   </span>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    {replaceExisting
+                      ? "This will replace your entire current workspace list."
+                      : importPreview.length === 1
+                        ? "This avatar will be appended — existing avatars stay untouched."
+                        : "These avatars will be appended — existing avatars stay untouched."}
+                  </p>
                   <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
                     <input
                       type="checkbox"
@@ -285,10 +296,16 @@ export default function ExportImportModal({
                 <button
                   onClick={handleApplyImport}
                   disabled={!importPreview || importPreview.length === 0}
-                  className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-zinc-950 bg-white hover:bg-zinc-200 rounded-xl transition disabled:opacity-40 cursor-pointer"
+                  className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl transition disabled:opacity-40 cursor-pointer ${
+                    replaceExisting
+                      ? "text-amber-50 bg-amber-700 hover:bg-amber-600"
+                      : "text-zinc-950 bg-white hover:bg-zinc-200"
+                  }`}
                 >
                   <Upload className="w-4 h-4" />
-                  <span>Apply Import</span>
+                  <span>
+                    {replaceExisting ? "Replace Workspace" : "Add to Workspace"}
+                  </span>
                 </button>
               </div>
             </div>

@@ -2,10 +2,87 @@ import { extractOutfitColors } from "@/lib/roblox-colors";
 import { getErrorMessage } from "@/lib/error-message";
 import {
   ArrangedOutfit,
+  ExportManifest,
   RobloxAsset,
   RobloxBodyColors,
   RobloxScale,
+  RobloxUser,
 } from "@/types/roblox";
+
+const DEFAULT_SCALE: RobloxScale = {
+  height: 1,
+  width: 1,
+  head: 1,
+  depth: 1,
+  proportion: 0,
+  bodyType: 0,
+};
+
+export function buildOutfitExportEntry(
+  outfit: ArrangedOutfit,
+  orderIndex = 0,
+): ExportManifest["outfits"][number] {
+  const colors = extractOutfitColors(outfit.details || outfit);
+  const assets = outfit.details?.assets || [];
+  return {
+    id: outfit.id,
+    name: outfit.name,
+    playerAvatarType: outfit.details?.playerAvatarType || "R15",
+    bodyColors: colors.bodyColors,
+    bodyColor3s: colors.bodyColor3s,
+    scale: outfit.details?.scale || DEFAULT_SCALE,
+    assetIds: assets.map((a) => a.id),
+    assets,
+    thumbnailUrl: outfit.thumbnailUrl,
+    orderIndex,
+  };
+}
+
+export function buildSingleOutfitExport(
+  outfit: ArrangedOutfit,
+  user?: RobloxUser | null,
+): ExportManifest {
+  return {
+    version: "1.0.0",
+    source: "Roblox Avatar Manager",
+    exportedAt: new Date().toISOString(),
+    user: {
+      id: user?.id || 0,
+      name: user?.name || "Anonymous",
+      displayName: user?.displayName || "Player",
+    },
+    totalOutfits: 1,
+    outfits: [buildOutfitExportEntry(outfit, 0)],
+  };
+}
+
+export function outfitExportFilename(outfit: ArrangedOutfit): string {
+  const slug =
+    outfit.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "avatar";
+  return `avatar-${outfit.id}-${slug}.json`;
+}
+
+export function downloadOutfitExportJson(
+  outfit: ArrangedOutfit,
+  user?: RobloxUser | null,
+): void {
+  const manifest = buildSingleOutfitExport(outfit, user);
+  const blob = new Blob([JSON.stringify(manifest, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = outfitExportFilename(outfit);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 export interface ParsedOutfitCandidate {
   id?: number;
